@@ -1,0 +1,105 @@
+import datetime as dt
+import numpy as np
+import sys
+
+from PDF_create import build_pdfs, build_branching
+from sampling import sample_empirical_ecdf, sample_outcome
+
+def next_weekday(d: dt.date) -> dt.date:
+    # 0=Mon ... 6=Sun
+    while d.weekday() >= 5:
+        d += dt.timedelta(days=1)
+    return d
+
+def trace_one_patient(start_date: dt.date, rng: np.random.Generator):
+    pdfs = build_pdfs()
+    branching = build_branching()
+
+    log = []
+    patient_id = "VP0001"
+
+    # Step 1: Referral
+    referral_date = start_date
+    log.append({"patient_id": patient_id, "event": "referral_received", "date": referral_date})
+
+    # Step 2: Referral -> MRI
+    t_ref_to_mri = sample_empirical_ecdf(pdfs["pre_referral_to_mri"], rng=rng)
+    mri_date_raw = referral_date + dt.timedelta(days=int(t_ref_to_mri))
+    mri_date = next_weekday(mri_date_raw)  # apply weekday constraint 
+    log.append({"patient_id": patient_id, "event": "mri_performed", "date": mri_date, "wait_days": int(t_ref_to_mri)})
+
+    # Step 3: MRI -> Report
+    t_mri_to_report = sample_empirical_ecdf(pdfs["pre_mri_to_mrireport"], rng=rng)
+    report_date_raw = mri_date + dt.timedelta(days=int(t_mri_to_report))
+    report_date = next_weekday(report_date_raw)  # apply weekday constraint 
+    log.append({"patient_id": patient_id, "event": "mri_report_ready", "date": report_date, "wait_days": int(t_mri_to_report)})
+
+    # Step 4: Report -> MDT
+    t_report_to_MDT = sample_empirical_ecdf(pdfs["pre_mrirep_to_biopsymdt"], rng=rng)
+    MDT_date_raw = report_date +  dt.timedelta(days=int(t_report_to_MDT ))
+    MDT_date = next_weekday(MDT_date_raw)  # apply weekday constraint  - !!!NEED TO FIND SPECIFIC MDT DAY!!!
+    log.append({"patient_id": patient_id, "event": "MDT occured", "date": MDT_date, "wait_days": int(t_report_to_MDT)})
+
+    # Step 5: MDT outcome (branch)
+    outcome = sample_outcome(branching["biopmdt_outcome"], rng=rng)
+    log.append({"patient_id": patient_id, "event": "mdt_decision", "date": report_date, "outcome": outcome})
+
+    # Step 6: Continue depending on outcome
+    if outcome == "1": # biopsy # MDT -> Biopsy
+        t_mdt_to_biopsy = sample_empirical_ecdf(pdfs["pre_biopmdt_to_biop"], rng=rng)
+        biopsy_date_raw = MDT_date + dt.timedelta(days=int(t_mdt_to_biopsy))
+        biopsy_date = next_weekday(biopsy_date_raw)
+        log.append({"patient_id": patient_id, "event": "biopsy_done", "date": biopsy_date, "wait_days": int(t_mdt_to_biopsy)})
+        #end_date = biopsy_date
+    else:
+        # discharge / surveillance etc
+        end_date = MDT_date 
+        log.append({"patient_id": patient_id, "event": "pathway_exit", "date": end_date})
+        total_days = (end_date - referral_date).days
+        return log, total_days
+
+    # Step 7: Biopsy -> Path Report
+    t_biopsy_to_pathreport = sample_empirical_ecdf(pdfs["pre_biop_to_pathrep"], rng=rng)
+    pathrep_date_raw = biopsy_date + dt.timedelta(days=int(t_biopsy_to_pathreport))
+    pathrep_date = next_weekday(pathrep_date_raw)  # apply weekday constraint 
+    log.append({"patient_id": patient_id, "event": "Path report recieved", "date": pathrep_date, "wait_days": int(t_biopsy_to_pathreport)})
+
+
+    # Step 8: Path report outcome (branch)
+    path_outcome = sample_outcome(branching["pathrep_outcome"], rng=rng)
+    log.append({"patient_id": patient_id, "event": "Path report outcome", "date": pathrep_date, "outcome": path_outcome})
+
+    # step 9: Continue depending on outcome : Path report -> Treatment MDT 
+    if outcome == "1": # cancer # Path report -> Treatment MDT 
+        t_pathrep_to_treatMDT = sample_empirical_ecdf(pdfs["pre_pathrep_to_treatmdt"], rng=rng)
+        treatMDT_date_raw = pathrep_date + dt.timedelta(days=int(t_pathrep_to_treatMDT))
+        treatMDT_date = next_weekday(treatMDT_date_raw) # !!! GET TEATMENT MDT DAYS!!!
+        log.append({"patient_id": patient_id, "event": "Treatment options MDT occured", "date": treatMDT_date, "wait_days": int(t_pathrep_to_treatMDT)})
+    else:
+        # 0 - no pathology found
+        end_date = treatMDT_date 
+        log.append({"patient_id": patient_id, "event": "pathway_exit", "date": end_date})
+        total_days = (end_date - referral_date).days
+        return log, total_days
+
+    # Step 10: TreatmentMDT -> Outpatient appointment 
+    t_treatMDT_to_outpat = sample_empirical_ecdf(pdfs["pre_treatmdt_to_outpat"], rng=rng)
+    outpat_date_raw = treatMDT_date + dt.timedelta(days=int(t_treatMDT_to_outpat))
+    outpat_date = next_weekday(outpat_date_raw)  # apply weekday constraint 
+    log.append({"patient_id": patient_id, "event": "Outpatient appointment occured", "date": outpat_date, "wait_days": int(t_treatMDT_to_outpat)})
+
+    #step 11: end pathway 
+    end_date = outpat_date
+    log.append({"patient_id": patient_id, "event": "pathway_end", "date": end_date})
+    
+
+    total_days = (end_date - referral_date).days
+    return log, total_days
+
+if __name__ == "__main__":
+    rng = np.random.default_rng(42)
+    log, total_days = trace_one_patient(dt.date(2026, 1, 5), rng)
+
+    for e in log:
+        print(e)
+    print("Total pathway days:", total_days)
