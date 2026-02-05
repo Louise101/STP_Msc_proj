@@ -135,6 +135,9 @@ path_dec_branch_probs = path_dec ["Outcome code"].value_counts(normalize=True)
 #print(path_dec_branch_probs)
 
 # save PDFs and branching proabilities into project directory
+# “To ensure modularity and transparency, empirical waiting-time 
+# distributions and branching probabilities were derived 
+# in standalone preprocessing scripts and imported into the simulation as independent inputs.”
 pdfs = {
     "pre_referral_to_mri": pdf_pre_ref_to_mri,
     "pre_mri_to_mrireport": pdf_pre_mri_to_mrireport,
