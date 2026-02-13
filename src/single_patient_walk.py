@@ -1,9 +1,12 @@
 import datetime as dt
 import numpy as np
 import sys
+from typing import Optional, Dict, Any
 
 from PDF_create import build_pdfs, build_branching
 from sampling import sample_empirical_ecdf, sample_outcome
+
+
 
 def next_weekday(d: dt.date) -> dt.date:
     # 0=Mon ... 6=Sun
@@ -11,14 +14,18 @@ def next_weekday(d: dt.date) -> dt.date:
         d += dt.timedelta(days=1)
     return d
 
-def trace_one_patient(start_date: dt.date, rng: np.random.Generator):
+#def trace_one_patient(start_date: dt.date, rng: np.random.Generator, patient_id: str = "VP0001"):
+def trace_one_patient(start_date: dt.date, rng, pdfs: Optional[dict] = None, branching: Optional[dict] = None, patient_id="VP0001"):
+
+
+
     pdfs = build_pdfs()
     branching = build_branching()
    
 
 
     log = []
-    patient_id = "VP0001"
+    #patient_id = "VP0001"
 
     # Step 1: Referral
     referral_date = start_date
@@ -44,7 +51,7 @@ def trace_one_patient(start_date: dt.date, rng: np.random.Generator):
 
     # Step 5: MDT outcome (branch)
     outcome = sample_outcome(branching["biopmdt_outcome"], rng=rng)
-    print("biop keys:", branching["biopmdt_outcome"].keys())
+    #print("biop keys:", branching["biopmdt_outcome"].keys())
     outcome = int(outcome)
     log.append({"patient_id": patient_id, "event": "mdt_decision", "date": MDT_date, "outcome": outcome})
 
@@ -71,7 +78,7 @@ def trace_one_patient(start_date: dt.date, rng: np.random.Generator):
 
     # Step 8: Path report outcome (branch)
     path_outcome = sample_outcome(branching["pathrep_outcome"], rng=rng)
-    print("path keys:", branching["pathrep_outcome"].keys())
+    #print("path keys:", branching["pathrep_outcome"].keys())
     path_outcome = int(path_outcome)
     log.append({"patient_id": patient_id, "event": "Path_report_outcome", "date": pathrep_date, "outcome": path_outcome})
 
