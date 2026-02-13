@@ -134,7 +134,17 @@ def build_branching(data_dir: Path = DATA_DIR):
     # 2 = discharge
     biop_mdt_dec = pd.read_csv( DATA_DIR / "pre_biop_dec.csv")
 
-    biop_dec_branch_probs = biop_mdt_dec ["Outcome code"].value_counts(normalize=True).to_dict()
+
+    biop_mdt_dec["Outcome code"] = pd.to_numeric(biop_mdt_dec["Outcome code"], errors="coerce").astype("Int64")
+
+
+
+
+    #biop_dec_branch_probs = biop_mdt_dec ["Outcome code"].value_counts(normalize=True).to_dict()
+
+    biop_dec_branch_probs = biop_mdt_dec["Outcome code"].value_counts(normalize=True).dropna().to_dict()
+    biop_dec_branch_probs = {int(k): float(v) for k, v in biop_dec_branch_probs.items()}
+
     #print(biop_dec_branch_probs)
 
     # biopsy outcome
@@ -143,7 +153,16 @@ def build_branching(data_dir: Path = DATA_DIR):
 
     path_dec = pd.read_csv( DATA_DIR / "pre_pathrep_outcome.csv")
 
-    path_dec_branch_probs = path_dec ["Outcome code"].value_counts(normalize=True).to_dict()
+   
+    path_dec["Outcome code"] = pd.to_numeric(path_dec["Outcome code"], errors="coerce").astype("Int64")
+
+    #path_dec_branch_probs = path_dec ["Outcome code"].value_counts(normalize=True).to_dict()
+    path_dec_branch_probs = path_dec["Outcome code"].value_counts(normalize=True).dropna().to_dict()
+    path_dec_branch_probs = {int(k): float(v) for k, v in path_dec_branch_probs.items()}
+
+
+
+    
 
     return {
         "biopmdt_outcome": biop_dec_branch_probs,

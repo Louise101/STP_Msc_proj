@@ -14,6 +14,8 @@ def next_weekday(d: dt.date) -> dt.date:
 def trace_one_patient(start_date: dt.date, rng: np.random.Generator):
     pdfs = build_pdfs()
     branching = build_branching()
+   
+
 
     log = []
     patient_id = "VP0001"
@@ -38,14 +40,16 @@ def trace_one_patient(start_date: dt.date, rng: np.random.Generator):
     t_report_to_MDT = sample_empirical_ecdf(pdfs["pre_mrirep_to_biopsymdt"], rng=rng)
     MDT_date_raw = report_date +  dt.timedelta(days=int(t_report_to_MDT ))
     MDT_date = next_weekday(MDT_date_raw)  # apply weekday constraint  - !!!NEED TO FIND SPECIFIC MDT DAY!!!
-    log.append({"patient_id": patient_id, "event": "MDT occured", "date": MDT_date, "wait_days": int(t_report_to_MDT)})
+    log.append({"patient_id": patient_id, "event": "MDT_occured", "date": MDT_date, "wait_days": int(t_report_to_MDT)})
 
     # Step 5: MDT outcome (branch)
     outcome = sample_outcome(branching["biopmdt_outcome"], rng=rng)
-    log.append({"patient_id": patient_id, "event": "mdt_decision", "date": report_date, "outcome": outcome})
+    print("biop keys:", branching["biopmdt_outcome"].keys())
+    outcome = int(outcome)
+    log.append({"patient_id": patient_id, "event": "mdt_decision", "date": MDT_date, "outcome": outcome})
 
     # Step 6: Continue depending on outcome
-    if outcome == "1": # biopsy # MDT -> Biopsy
+    if outcome == 1: # biopsy # MDT -> Biopsy
         t_mdt_to_biopsy = sample_empirical_ecdf(pdfs["pre_biopmdt_to_biop"], rng=rng)
         biopsy_date_raw = MDT_date + dt.timedelta(days=int(t_mdt_to_biopsy))
         biopsy_date = next_weekday(biopsy_date_raw)
@@ -62,22 +66,24 @@ def trace_one_patient(start_date: dt.date, rng: np.random.Generator):
     t_biopsy_to_pathreport = sample_empirical_ecdf(pdfs["pre_biop_to_pathrep"], rng=rng)
     pathrep_date_raw = biopsy_date + dt.timedelta(days=int(t_biopsy_to_pathreport))
     pathrep_date = next_weekday(pathrep_date_raw)  # apply weekday constraint 
-    log.append({"patient_id": patient_id, "event": "Path report recieved", "date": pathrep_date, "wait_days": int(t_biopsy_to_pathreport)})
+    log.append({"patient_id": patient_id, "event": "Path_report_recieved", "date": pathrep_date, "wait_days": int(t_biopsy_to_pathreport)})
 
 
     # Step 8: Path report outcome (branch)
     path_outcome = sample_outcome(branching["pathrep_outcome"], rng=rng)
-    log.append({"patient_id": patient_id, "event": "Path report outcome", "date": pathrep_date, "outcome": path_outcome})
+    print("path keys:", branching["pathrep_outcome"].keys())
+    path_outcome = int(path_outcome)
+    log.append({"patient_id": patient_id, "event": "Path_report_outcome", "date": pathrep_date, "outcome": path_outcome})
 
     # step 9: Continue depending on outcome : Path report -> Treatment MDT 
-    if outcome == "1": # cancer # Path report -> Treatment MDT 
+    if path_outcome == 1: # cancer # Path report -> Treatment MDT 
         t_pathrep_to_treatMDT = sample_empirical_ecdf(pdfs["pre_pathrep_to_treatmdt"], rng=rng)
         treatMDT_date_raw = pathrep_date + dt.timedelta(days=int(t_pathrep_to_treatMDT))
         treatMDT_date = next_weekday(treatMDT_date_raw) # !!! GET TEATMENT MDT DAYS!!!
-        log.append({"patient_id": patient_id, "event": "Treatment options MDT occured", "date": treatMDT_date, "wait_days": int(t_pathrep_to_treatMDT)})
+        log.append({"patient_id": patient_id, "event": "Treatment_options_MDT_occured", "date": treatMDT_date, "wait_days": int(t_pathrep_to_treatMDT)})
     else:
         # 0 - no pathology found
-        end_date = treatMDT_date 
+        end_date = pathrep_date
         log.append({"patient_id": patient_id, "event": "pathway_exit", "date": end_date})
         total_days = (end_date - referral_date).days
         return log, total_days
@@ -86,7 +92,7 @@ def trace_one_patient(start_date: dt.date, rng: np.random.Generator):
     t_treatMDT_to_outpat = sample_empirical_ecdf(pdfs["pre_treatmdt_to_outpat"], rng=rng)
     outpat_date_raw = treatMDT_date + dt.timedelta(days=int(t_treatMDT_to_outpat))
     outpat_date = next_weekday(outpat_date_raw)  # apply weekday constraint 
-    log.append({"patient_id": patient_id, "event": "Outpatient appointment occured", "date": outpat_date, "wait_days": int(t_treatMDT_to_outpat)})
+    log.append({"patient_id": patient_id, "event": "Outpatient_appointment_occured", "date": outpat_date, "wait_days": int(t_treatMDT_to_outpat)})
 
     #step 11: end pathway 
     end_date = outpat_date
@@ -96,10 +102,12 @@ def trace_one_patient(start_date: dt.date, rng: np.random.Generator):
     total_days = (end_date - referral_date).days
     return log, total_days
 
+
 if __name__ == "__main__":
     rng = np.random.default_rng(42)
     log, total_days = trace_one_patient(dt.date(2026, 1, 5), rng)
 
     for e in log:
-        print(e)
+        #print(e)
+        print(e["event"], e.get("date"))
     print("Total pathway days:", total_days)
