@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+
 from pathlib import Path
 from scipy.stats import ks_2samp, chisquare
 
@@ -29,7 +30,9 @@ STAGE_MAP = {
     "Treatment_options_MDT_occured": "pre_pathrep_to_treatmdt",
     "Outpatient_appointment_occured": "pre_treatmdt_to_outpat",
 }
-
+# set OBSERVED_TOTALS to the path and define the column name.
+OBSERVED_TOTALS = PROJECT_ROOT / "data" / "Pre_observed_total_times.csv"
+OBSERVED_TOTAL_COL = "total_days"
 
 def ecdf(x: np.ndarray):
     x = np.asarray(x)
@@ -158,6 +161,74 @@ def main():
     stage_summary = pd.DataFrame(stage_rows).sort_values("stage_event")
     stage_summary.to_csv(OUTPUT_DIR / "stage_waittime_verification.csv", index=False)
 
+    #total pathway time verification
+
+    overall_rows = []
+    sim_total = pd.to_numeric(results_df["total_days"], errors="coerce").dropna().values
+    sim_total_stats = summary_stats(sim_total)
+
+    overall_rows.append({"metric": "sim_total_days", **sim_total_stats})
+
+    
+    obs_total_df = pd.read_csv(OBSERVED_TOTALS)
+    obs_total = pd.to_numeric(obs_total_df[OBSERVED_TOTAL_COL], errors="coerce").dropna().values
+    obs_total_stats = summary_stats(obs_total)
+    overall_rows.append({"metric": "obs_total_days", **obs_total_stats})
+
+        # KS test for overall totals
+    ks = ks_2samp(sim_total, obs_total)
+    overall_rows.append({
+        "metric": "ks_total_days",
+        "ks_statistic": float(ks.statistic),
+        "ks_pvalue": float(ks.pvalue),
+    })
+
+    save_hist_overlay(
+        sim_total, obs_total,
+        title="Overall total pathway time (Sim vs Observed)",
+        filename=OUTPUT_DIR / "hist_total_days.png",
+    )
+    save_ecdf_overlay(
+        sim_total, obs_total,
+        title="Overall ECDF total pathway time (Sim vs Observed)",
+        filename=OUTPUT_DIR / "ecdf_total_days.png",)
+        
+    
+
+    overall_summary = pd.DataFrame(overall_rows)
+    overall_summary.to_csv(OUTPUT_DIR / "overall_verification.csv", index=False)
+
+    #comparison of obs and sim overall pathways 
+
+
+    obs_mean = np.mean(obs_total)
+    sim_mean = np.mean(sim_total)
+
+    obs_median = np.median(obs_total)
+    sim_median = np.median(sim_total)
+
+# Absolute differences
+    mean_diff = sim_mean - obs_mean
+    median_diff = sim_median - obs_median
+
+# Relative differences (%)
+    mean_pct_diff = 100 * mean_diff / obs_mean
+    median_pct_diff = 100 * median_diff / obs_median
+
+# KS test
+    ks_stat, ks_p = ks_2samp(obs_total, sim_total)
+
+    print("Observed mean:", obs_mean)
+    print("Simulated mean:", sim_mean)
+    print("Mean difference:", mean_diff, f"({mean_pct_diff:.2f}%)")
+
+    print("Observed median:", obs_median)
+    print("Simulated median:", sim_median)
+    print("Median difference:", median_diff, f"({median_pct_diff:.2f}%)")
+
+    print("KS statistic:", ks_stat)
+    print("KS p-value:", ks_p)
+
 
     #  Outcome distribution checks (Sim vs observed branching probabilities)
 
@@ -235,3 +306,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
