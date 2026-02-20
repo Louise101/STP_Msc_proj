@@ -2,6 +2,7 @@ from __future__ import annotations
 #from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 import numpy as np
+import pandas as pd
 
 
 Number = Union[int, float]
@@ -14,7 +15,7 @@ def _get_rng(rng: Optional[np.random.Generator] = None) -> np.random.Generator:
 
 #function to sample ecdf of waiting times 
 
-def sample_empirical_ecdf(
+def sample_empirical_ecdf_orig(
     samples: Sequence[Number], # input data
     n: int = 1, # number of samples to draw - default is 1 
     rng: Optional[np.random.Generator] = None, #optional rng for reprodcibility 
@@ -71,6 +72,41 @@ def sample_empirical_ecdf(
     if n == 1:
         return int(draws[0]) # restuns single value if n=1 and array if n>1 
     return draws
+
+
+def sample_empirical_ecdf(samples: pd.Series, rng: np.random.Generator, u: float | None = None) -> int:
+    """
+    Sample an integer value from empirical samples using inverse transform sampling.
+    If u is provided, it must be in [0,1) and will be used instead of drawing a new uniform.
+    """
+    x = np.sort(samples.dropna().to_numpy())
+    if len(x) == 0:
+        raise ValueError("Empty empirical sample array")
+
+    if u is None:
+        u = rng.random()
+    else:
+        if not (0.0 <= u < 1.0):
+            raise ValueError("u must be in [0,1)")
+
+    # k = smallest index such that (k+1)/n >= u  (0-indexed)
+    n = len(x)
+    k = int(np.ceil(u * n)) - 1
+    k = max(0, min(k, n - 1))
+    return int(x[k])
+
+def correlated_u(u_patient: float, rng: np.random.Generator, alpha: float) -> float:
+    """
+    Blend patient-level quantile with stage-specific noise.
+    alpha=1 -> independent
+    alpha=0 -> fully correlated (uses u_patient only)
+    """
+    if not (0.0 <= alpha <= 1.0):
+        raise ValueError("alpha must be between 0 and 1")
+    u_stage = rng.random()
+    u = (1 - alpha) * u_patient + alpha * u_stage
+    # Keep strictly < 1.0 for indexing safety
+    return min(u, np.nextafter(1.0, 0.0))
 
 
 #function to sample outcomes 

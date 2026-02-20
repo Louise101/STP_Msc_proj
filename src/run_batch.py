@@ -3,7 +3,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from single_walk_mdt_day import trace_one_patient_mdtday
 from single_patient_walk import trace_one_patient
+
 from PDF_create import build_pdfs, build_branching
 
 
@@ -35,7 +37,8 @@ def simulate_n_patients(
 
       
         #log, total_days = trace_one_patient(start_date, patient_rng, patient_id=patient_id)
-        log, total_days = trace_one_patient(start_date, patient_rng, pdfs, branching, patient_id=patient_id)
+        #log, total_days = trace_one_patient(start_date, patient_rng, pdfs, branching, patient_id=patient_id)
+        log, total_days = trace_one_patient_mdtday(start_date, patient_rng, pdfs, branching, patient_id=patient_id)
 
         # Pull key events/outcomes using your exact event names
         referral_event = _get_event(log, "referral_received")
