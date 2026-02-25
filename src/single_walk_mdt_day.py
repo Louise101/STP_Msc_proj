@@ -32,8 +32,8 @@ TREATMDT_DAYS = {4}  # Friday
 #def trace_one_patient(start_date: dt.date, rng: np.random.Generator, patient_id: str = "VP0001"):
 def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = None, branching: Optional[dict] = None, patient_id="VP0001"):
 
-    u_patient = rng.random()
-    ALPHA = 0.4  # try 0.4 first; tune later
+   # u_patient = rng.random()
+   # ALPHA = 0.4  # try 0.4 first; tune later
 
     pdfs = build_pdfs()
     branching = build_branching()
@@ -50,8 +50,8 @@ def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = No
     # Step 2: Referral -> MRI
     #t_ref_to_mri = sample_empirical_ecdf(pdfs["pre_referral_to_mri"], rng=rng)
     from sampling import correlated_u
-    u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
-    t_ref_to_mri = sample_empirical_ecdf(pdfs["pre_referral_to_mri"], rng=rng, u=u)
+    #u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
+    t_ref_to_mri = sample_empirical_ecdf(pdfs["pre_referral_to_mri"], rng=rng)
     mri_date_raw = referral_date + dt.timedelta(days=int(t_ref_to_mri))
     mri_date = next_weekday(mri_date_raw)  # apply weekday constraint 
     log.append({"patient_id": patient_id, "event": "mri_performed", "date": mri_date, "wait_days": int(t_ref_to_mri)})
@@ -59,16 +59,16 @@ def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = No
     # Step 3: MRI -> Report
    # t_mri_to_report = sample_empirical_ecdf(pdfs["pre_mri_to_mrireport"], rng=rng)
     from sampling import correlated_u
-    u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
-    t_mri_to_report = sample_empirical_ecdf(pdfs["pre_mri_to_mrireport"], rng=rng, u=u)
+    #u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
+    t_mri_to_report = sample_empirical_ecdf(pdfs["pre_mri_to_mrireport"], rng=rng)
     report_date_raw = mri_date + dt.timedelta(days=int(t_mri_to_report))
     report_date = next_weekday(report_date_raw)  # apply weekday constraint 
     log.append({"patient_id": patient_id, "event": "mri_report_ready", "date": report_date, "wait_days": int(t_mri_to_report)})
 
     # Step 4: Report -> MDT
     #q = sample_empirical_ecdf(pdfs["queue_mrirep_to_biopsymdt"], rng=rng)
-    u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
-    q= sample_empirical_ecdf(pdfs["queue_mrirep_to_biopsymdt"], rng=rng, u=u)
+    #u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
+    q= sample_empirical_ecdf(pdfs["queue_mrirep_to_biopsymdt"], rng=rng)
     ready_date = report_date + dt.timedelta(days=int(q))
     MDT_date = next_allowed_weekday(ready_date, {2})  # Wed
     wait_effective = (MDT_date - report_date).days
@@ -104,8 +104,8 @@ def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = No
     # Step 6: Continue depending on outcome
     if outcome == 1: # biopsy # MDT -> Biopsy
         #t_mdt_to_biopsy = sample_empirical_ecdf(pdfs["pre_biopmdt_to_biop"], rng=rng)
-        u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
-        t_mdt_to_biopsy = sample_empirical_ecdf(pdfs["pre_biopmdt_to_biop"], rng=rng, u=u)
+       # u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
+        t_mdt_to_biopsy = sample_empirical_ecdf(pdfs["pre_biopmdt_to_biop"], rng=rng)
         biopsy_date_raw = MDT_date + dt.timedelta(days=int(t_mdt_to_biopsy))
         biopsy_date = next_weekday(biopsy_date_raw)
         log.append({"patient_id": patient_id, "event": "biopsy_done", "date": biopsy_date, "wait_days": int(t_mdt_to_biopsy)})
@@ -119,8 +119,8 @@ def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = No
 
     # Step 7: Biopsy -> Path Report
    # t_biopsy_to_pathreport = sample_empirical_ecdf(pdfs["pre_biop_to_pathrep"], rng=rng)
-    u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
-    t_biopsy_to_pathreport = sample_empirical_ecdf(pdfs["pre_biop_to_pathrep"], rng=rng,u=u)
+    #u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
+    t_biopsy_to_pathreport = sample_empirical_ecdf(pdfs["pre_biop_to_pathrep"], rng=rng)
     pathrep_date_raw = biopsy_date + dt.timedelta(days=int(t_biopsy_to_pathreport))
     pathrep_date = next_weekday(pathrep_date_raw)  # apply weekday constraint 
     log.append({"patient_id": patient_id, "event": "Path_report_recieved", "date": pathrep_date, "wait_days": int(t_biopsy_to_pathreport)})
@@ -134,8 +134,8 @@ def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = No
 
     # step 9: Continue depending on outcome : Path report -> Treatment MDT 
     if path_outcome == 1: # cancer # Path report -> Treatment MDT 
-        u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
-        q = sample_empirical_ecdf(pdfs["queue_pathrep_to_treatmdt"], rng=rng, u=u)
+       # u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
+        q = sample_empirical_ecdf(pdfs["queue_pathrep_to_treatmdt"], rng=rng)
         ready_date = pathrep_date + dt.timedelta(days=int(q))
         treatMDT_date = next_allowed_weekday(ready_date, {4})  # Fri
         wait_effective = (treatMDT_date - pathrep_date).days
@@ -170,8 +170,8 @@ def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = No
         return log, total_days
 
     # Step 10: TreatmentMDT -> Outpatient appointment 
-    u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
-    t_treatMDT_to_outpat = sample_empirical_ecdf(pdfs["pre_treatmdt_to_outpat"], rng=rng, u=u)
+   # u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
+    t_treatMDT_to_outpat = sample_empirical_ecdf(pdfs["pre_treatmdt_to_outpat"], rng=rng)
     outpat_date_raw = treatMDT_date + dt.timedelta(days=int(t_treatMDT_to_outpat))
     outpat_date = next_weekday(outpat_date_raw)  # apply weekday constraint 
     log.append({"patient_id": patient_id, "event": "Outpatient_appointment_occured", "date": outpat_date, "wait_days": int(t_treatMDT_to_outpat)})
@@ -188,7 +188,7 @@ def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = No
 
 if __name__ == "__main__":
     rng = np.random.default_rng(42)
-    log, total_days = trace_one_patient(dt.date(2026, 1, 5), rng)
+    log, total_days = trace_one_patient_mdtday(dt.date(2026, 1, 5), rng)
 
     for e in log:
         #print(e)
