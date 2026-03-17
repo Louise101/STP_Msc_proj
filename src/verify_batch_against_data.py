@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 BATCH_RESULTS = PROJECT_ROOT / "batch_results.csv"
 BATCH_EVENTS = PROJECT_ROOT / "batch_events.csv"
+BATCH_SIMWAITS = PROJECT_ROOT / "sim_waits.csv"
 
 OUTPUT_DIR = PROJECT_ROOT / "verification_outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -40,6 +41,26 @@ def ecdf(x: np.ndarray):
     x = np.sort(x)
     y = np.arange(1, len(x) + 1) / len(x) if len(x) else np.array([])
     return x, y
+
+def empirical_percentile(value: float, samples: pd.Series) -> float:
+    """
+    Return the empirical percentile F(value) based on the observed samples.
+    Output is clipped to [eps, 1-eps] for numerical stability.
+    """
+    x, _ = ecdf(samples.to_numpy())
+
+    if len(x) == 0:
+        raise ValueError("Empty empirical sample array")
+
+    # proportion of observed values <= value
+    rank = np.searchsorted(x, value, side="right")
+    u = rank / len(x)
+
+    # Avoid exactly 0 or 1 because inverse normal transform needs open interval
+    eps = 1e-10
+    u = min(max(u, eps), 1.0 - eps)
+    return u
+
 
 
 def save_hist_overlay(sim, obs, title, filename, bins=30):
@@ -99,6 +120,8 @@ def main():
     # Load simulated outputs
     results_df = pd.read_csv(BATCH_RESULTS)
     events_df = pd.read_csv(BATCH_EVENTS)
+    simwaits_df = pd.read_csv(BATCH_SIMWAITS)
+
 
     # Ensure wait_days numeric where present
     if "wait_days" in events_df.columns:
@@ -301,6 +324,18 @@ def main():
     print("- overall_verification.csv")
     print("- outcome_verification.csv")
     print("- hist_*.png and ecdf_*.png per stage (plus totals)")
+
+    print("\nSIMULATED CORRELATION CHECK")
+
+    subset = simwaits_df[["wait_ref_to_mri", "wait_mri_to_report"]].dropna()
+
+    print("\nSIMULATED FIRST-TWO-STAGE CORRELATION CHECK")
+
+    print("\nSpearman:")
+    print(subset.corr(method="spearman"))
+
+    print("\nKendall:")
+    print(subset.corr(method="kendall"))
 
 
 

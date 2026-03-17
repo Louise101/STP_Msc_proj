@@ -4,7 +4,7 @@ import sys
 from typing import Optional, Dict, Any
 
 from PDF_create import build_pdfs, build_branching
-from sampling import sample_empirical_ecdf, sample_outcome
+from sampling import sample_empirical_ecdf, sample_outcome,sample_mri_to_report_correlated
 
 
 
@@ -49,7 +49,7 @@ def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = No
 
     # Step 2: Referral -> MRI
     #t_ref_to_mri = sample_empirical_ecdf(pdfs["pre_referral_to_mri"], rng=rng)
-    from sampling import correlated_u
+    #from sampling import correlated_u
     #u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
     t_ref_to_mri = sample_empirical_ecdf(pdfs["pre_referral_to_mri"], rng=rng)
     mri_date_raw = referral_date + dt.timedelta(days=int(t_ref_to_mri))
@@ -58,42 +58,36 @@ def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = No
 
     # Step 3: MRI -> Report
    # t_mri_to_report = sample_empirical_ecdf(pdfs["pre_mri_to_mrireport"], rng=rng)
-    from sampling import correlated_u
+    #from sampling import correlated_u
     #u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
-    t_mri_to_report = sample_empirical_ecdf(pdfs["pre_mri_to_mrireport"], rng=rng)
+   # t_mri_to_report = sample_empirical_ecdf(pdfs["pre_mri_to_mrireport"], rng=rng)
+    t_mri_to_report = sample_mri_to_report_correlated(
+    ref_to_mri_wait=t_ref_to_mri,
+    ref_to_mri_samples=pdfs["pre_referral_to_mri"],
+    mri_to_report_samples=pdfs["pre_mri_to_mrireport"],
+    rng=rng,
+    gaussian_corr=0.2)
+
     report_date_raw = mri_date + dt.timedelta(days=int(t_mri_to_report))
     report_date = next_weekday(report_date_raw)  # apply weekday constraint 
     log.append({"patient_id": patient_id, "event": "mri_report_ready", "date": report_date, "wait_days": int(t_mri_to_report)})
 
     # Step 4: Report -> MDT
-    #q = sample_empirical_ecdf(pdfs["queue_mrirep_to_biopsymdt"], rng=rng)
-    #u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
-    q= sample_empirical_ecdf(pdfs["queue_mrirep_to_biopsymdt"], rng=rng)
-    ready_date = report_date + dt.timedelta(days=int(q))
-    MDT_date = next_allowed_weekday(ready_date, {2})  # Wed
-    wait_effective = (MDT_date - report_date).days
-    log.append({
-        "patient_id": patient_id,
-        "event": "MDT_occured",
-        "date": MDT_date,
-        "wait_days": wait_effective
-    })
-    #t_report_to_MDT = sample_empirical_ecdf(pdfs["pre_mrirep_to_biopsymdt"], rng=rng)
-    #MDT_date_raw = report_date +  dt.timedelta(days=int(t_report_to_MDT ))
-   # MDT_date = next_weekday(MDT_date_raw)  # apply weekday constraint  - !!!NEED TO FIND SPECIFIC MDT DAY!!!
-    #MDT_date_raw = report_date + dt.timedelta(days=int(t_report_to_MDT))
-    #MDT_date = next_allowed_weekday(MDT_date_raw, BIOPMDT_DAYS)
-    #MDT_date = next_mdt_day(report_date, BIOPMDT_WEEKDAY, include_today=True)
-    #wait = (MDT_date - report_date).days
-    #log.append({"patient_id": patient_id, "event": "MDT_occured", "date": MDT_date, "wait_days": wait})
-    #log.append({"patient_id": patient_id, "event": "MDT_occured", "date": MDT_date, "wait_days": int(t_report_to_MDT)})
-    #log.append({
-    #"patient_id": patient_id,
-    #"event": "MDT_occured",
-    #"date": MDT_date,
-    #"wait_days_sampled": int(t_report_to_MDT),
-    #"wait_days": (MDT_date - report_date).days,
-#})
+
+    #q= sample_empirical_ecdf(pdfs["queue_mrirep_to_biopsymdt"], rng=rng)
+    #ready_date = report_date + dt.timedelta(days=int(q))
+    #MDT_date = next_allowed_weekday(ready_date, {2})  # Wed
+    #wait_effective = (MDT_date - report_date).days
+   # log.append({
+      #  "patient_id": patient_id,
+     #   "event": "MDT_occured",
+    #    "date": MDT_date,
+   #     "wait_days": wait_effective
+   # })
+    t_report_to_MDT = sample_empirical_ecdf(pdfs["pre_mrirep_to_biopsymdt"], rng=rng)
+    MDT_date_raw = report_date +  dt.timedelta(days=int(t_report_to_MDT ))
+    MDT_date = next_weekday(MDT_date_raw)  # apply weekday constraint  - !!!NEED TO FIND SPECIFIC MDT DAY!!!
+    log.append({"patient_id": patient_id, "event": "MDT_occured", "date": MDT_date, "wait_days": int(t_report_to_MDT)})
 
     # Step 5: MDT outcome (branch)
     outcome = sample_outcome(branching["biopmdt_outcome"], rng=rng)
@@ -135,22 +129,22 @@ def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = No
     # step 9: Continue depending on outcome : Path report -> Treatment MDT 
     if path_outcome == 1: # cancer # Path report -> Treatment MDT 
        # u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
-        q = sample_empirical_ecdf(pdfs["queue_pathrep_to_treatmdt"], rng=rng)
-        ready_date = pathrep_date + dt.timedelta(days=int(q))
-        treatMDT_date = next_allowed_weekday(ready_date, {4})  # Fri
-        wait_effective = (treatMDT_date - pathrep_date).days
-        log.append({
-            "patient_id": patient_id,
-            "event": "Treatment_options_MDT_occured",
-            "date": treatMDT_date,
-            "wait_days": wait_effective
-        })
-        #t_pathrep_to_treatMDT = sample_empirical_ecdf(pdfs["pre_pathrep_to_treatmdt"], rng=rng)
-        #treatMDT_date_raw = pathrep_date + dt.timedelta(days=int(t_pathrep_to_treatMDT))
-        #treatMDT_date = next_weekday(treatMDT_date_raw) # !!! GET TEATMENT MDT DAYS!!!
+        #q = sample_empirical_ecdf(pdfs["queue_pathrep_to_treatmdt"], rng=rng)
+        #ready_date = pathrep_date + dt.timedelta(days=int(q))
+        #treatMDT_date = next_allowed_weekday(ready_date, {4})  # Fri
+        #wait_effective = (treatMDT_date - pathrep_date).days
+        #log.append({
+        #    "patient_id": patient_id,
+          #  "event": "Treatment_options_MDT_occured",
+         #   "date": treatMDT_date,
+          #  "wait_days": wait_effective
+        #})
+        t_pathrep_to_treatMDT = sample_empirical_ecdf(pdfs["pre_pathrep_to_treatmdt"], rng=rng)
+        treatMDT_date_raw = pathrep_date + dt.timedelta(days=int(t_pathrep_to_treatMDT))
+        treatMDT_date = next_weekday(treatMDT_date_raw) # !!! GET TEATMENT MDT DAYS!!!
         #treatMDT_date_raw = pathrep_date + dt.timedelta(days=int(t_pathrep_to_treatMDT))
        # treatMDT_date = next_allowed_weekday(treatMDT_date_raw, TREATMDT_DAYS)
-        #log.append({"patient_id": patient_id, "event": "Treatment_options_MDT_occured", "date": treatMDT_date, "wait_days": int(t_pathrep_to_treatMDT)})
+        log.append({"patient_id": patient_id, "event": "Treatment_options_MDT_occured", "date": treatMDT_date, "wait_days": int(t_pathrep_to_treatMDT)})
         #log.append({
         #"patient_id": patient_id,
         #"event": "MDT_occured",

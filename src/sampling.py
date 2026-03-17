@@ -3,9 +3,12 @@ from __future__ import annotations
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 
 
 Number = Union[int, float]
+
+from verify_batch_against_data import  empirical_percentile
 
 
 # set rng and use the same seed - code is reproducable. If not, a new generator will be used and results will change each time. 
@@ -94,6 +97,63 @@ def sample_empirical_ecdf(samples: pd.Series, rng: np.random.Generator, u: float
     k = int(np.ceil(u * n)) - 1
     k = max(0, min(k, n - 1))
     return int(x[k])
+
+
+
+def sample_mri_to_report_correlated(
+    ref_to_mri_wait: int,
+    ref_to_mri_samples: pd.Series,
+    mri_to_report_samples: pd.Series,
+    rng: np.random.Generator,
+    gaussian_corr,
+) -> int:
+    """
+    Sample MRI->report wait with mild positive dependence on referral->MRI wait.
+
+    Parameters
+    ----------
+    ref_to_mri_wait : int
+        Already sampled wait for referral -> MRI.
+    ref_to_mri_samples : pd.Series
+        Observed empirical samples for referral -> MRI.
+    mri_to_report_samples : pd.Series
+        Observed empirical samples for MRI -> report.
+    rng : np.random.Generator
+        Random number generator.
+    gaussian_corr : float
+        Correlation parameter on Gaussian copula scale.
+        Start small, e.g. 0.10 to 0.25.
+
+    Returns
+    -------
+    int
+        Sampled MRI -> report wait.
+    """
+
+    if not (-0.999 < gaussian_corr < 0.999):
+        raise ValueError("gaussian_corr must be between -0.999 and 0.999")
+
+    # Step 1: convert sampled referral->MRI wait into empirical percentile
+    u1 = empirical_percentile(ref_to_mri_wait, ref_to_mri_samples)
+
+    # Step 2: map percentile to Gaussian latent variable
+    z1 = norm.ppf(u1)
+
+    # Step 3: generate correlated latent variable
+    eps = rng.standard_normal()
+    z2 = gaussian_corr * z1 + np.sqrt(1.0 - gaussian_corr**2) * eps
+
+    # Step 4: convert back to uniform
+    u2 = norm.cdf(z2)
+
+    # Numerical safety for your sample_empirical_ecdf function
+    u2 = min(max(u2, 0.0), 1.0 - 1e-12)
+
+    # Step 5: sample MRI->report from empirical distribution using correlated uniform
+    return sample_empirical_ecdf(mri_to_report_samples, rng, u=u2)
+
+
+
 
 def correlated_u(u_patient: float, rng: np.random.Generator, alpha: float) -> float:
     """

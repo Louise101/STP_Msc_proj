@@ -1,0 +1,13 @@
+early_stage,later_stage,early_group,n,mean,median,std
+wait_ref_to_mri,wait_mri_to_report,fast_early,76,6.578947368421052,7.0,5.552808677644702
+wait_ref_to_mri,wait_mri_to_report,slow_early,74,8.256756756756756,7.5,4.000208250780359
+wait_mri_to_report,wait_report_to_biopmdt,fast_early,82,4.829268292682927,5.0,2.5278931746494
+wait_mri_to_report,wait_report_to_biopmdt,slow_early,65,5.753846153846154,6.0,2.186826819494753
+wait_report_to_biopmdt,wait_biopmdt_to_biopsy,fast_early,41,26.73170731707317,23.0,12.316704896691936
+wait_report_to_biopmdt,wait_biopmdt_to_biopsy,slow_early,27,29.185185185185187,22.0,14.406294129348828
+wait_biopmdt_to_biopsy,wait_biopsy_to_pathreport,fast_early,40,7.9,7.0,4.656398960790547
+wait_biopmdt_to_biopsy,wait_biopsy_to_pathreport,slow_early,23,10.173913043478262,8.0,4.996836944171815
+wait_biopsy_to_pathreport,wait_pathrep_to_treatmdt,fast_early,27,10.444444444444445,9.0,6.178955185101052
+wait_biopsy_to_pathreport,wait_pathrep_to_treatmdt,slow_early,22,11.090909090909092,10.0,5.536967460443367
+wait_pathrep_to_treatmdt,wait_treatmdt_to_outpat,fast_early,27,12.148148148148149,12.0,8.641152450310992
+wait_pathrep_to_treatmdt,wait_treatmdt_to_outpat,slow_early,20,9.8,11.0,5.395904879970013
