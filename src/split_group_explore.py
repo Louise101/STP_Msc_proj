@@ -2,6 +2,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.stats import ks_2samp
 
 # ============================================================
 # PATHS
@@ -521,3 +522,45 @@ def plot_all_subgroups(real_df, sim_df, output_dir: Path):
         print(f"Saved ECDF plot: {save_path}")
 
 plot_all_subgroups(real_patients, sim_patients, OUTPUT_DIR)
+
+
+
+def ks_by_subgroup(real_df: pd.DataFrame, sim_df: pd.DataFrame):
+    results = []
+
+    subgroups = sorted(set(real_df["pathway_subgroup"]).intersection(
+                       set(sim_df["pathway_subgroup"])))
+
+    for sg in subgroups:
+        real_vals = real_df.loc[
+            real_df["pathway_subgroup"] == sg, "total_pathway_days"
+        ].dropna()
+
+        sim_vals = sim_df.loc[
+            sim_df["pathway_subgroup"] == sg, "total_pathway_days"
+        ].dropna()
+
+        if len(real_vals) < 5 or len(sim_vals) < 5:
+            continue  # skip tiny groups
+
+        ks_stat, ks_p = ks_2samp(real_vals, sim_vals)
+
+        results.append({
+            "subgroup": sg,
+            "real_n": len(real_vals),
+            "sim_n": len(sim_vals),
+            "ks_statistic": ks_stat,
+            "ks_pvalue": ks_p
+        })
+
+    return pd.DataFrame(results)
+
+
+# Run it
+ks_results = ks_by_subgroup(real_patients, sim_patients)
+
+print("\nKS test by subgroup")
+print(ks_results.to_string(index=False))
+
+# Optional save
+ks_results.to_csv(OUTPUT_DIR / "ks_by_subgroup.csv", index=False)

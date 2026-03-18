@@ -14,11 +14,13 @@ from PDF_create import build_pdfs, build_branching
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-BATCH_RESULTS = PROJECT_ROOT / "batch_results.csv"
-BATCH_EVENTS = PROJECT_ROOT / "batch_events.csv"
+
 BATCH_SIMWAITS = PROJECT_ROOT / "sim_waits.csv"
 
 OUTPUT_DIR = PROJECT_ROOT / "verification_outputs"
+OUTPUTS = PROJECT_ROOT / "outputs"
+BATCH_RESULTS = OUTPUTS/ "batch_results.csv"
+BATCH_EVENTS = OUTPUTS / "batch_events.csv"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Map event names (in batch_events.csv) to PDF keys (from build_pdfs())

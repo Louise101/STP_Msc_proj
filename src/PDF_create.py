@@ -225,3 +225,63 @@ if __name__ == "__main__":
  #   "biopmdt_outcome": biop_dec_branch_probs,
   #   "pathrep_outcome": path_dec_branch_probs
 #}
+
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = BASE_DIR / "data"
+
+def build_pdfs2(exclude_np053_ref_to_mri: bool = True):
+    # Load files
+    pre_ref_to_mri = pd.read_csv(DATA_DIR / "pre_ref_to_mri.csv")
+    pre_mri_to_mrireport = pd.read_csv(DATA_DIR / "pre_mri_to_mrirep.csv")
+    pre_mrirep_to_biopsymdt = pd.read_csv(DATA_DIR / "pre_mrirep_to_biopmdt.csv")
+    pre_biopmdt_to_biop = pd.read_csv(DATA_DIR / "pre_biopmdt_to_biop.csv")
+    pre_biop_to_pathrep = pd.read_csv(DATA_DIR / "pre_biop_to_pathrep.csv")
+    pre_pathrep_to_treatmdt = pd.read_csv(DATA_DIR / "pre_pathrep_to_treatmdt.csv")
+    pre_treatmdt_to_outpat = pd.read_csv(DATA_DIR / "pre_treatmdt_to_outpat.csv")
+
+    # Optional sensitivity exclusion
+    if exclude_np053_ref_to_mri:
+        pre_ref_to_mri = pre_ref_to_mri.loc[
+            pre_ref_to_mri["Subject number"] != "NP053"
+        ].copy()
+
+    pdfs = {
+        "pre_referral_to_mri": (
+            pd.to_datetime(pre_ref_to_mri["Date of MRI"], dayfirst=True, errors="coerce")
+            - pd.to_datetime(pre_ref_to_mri["Date of referral to pathway"], dayfirst=True, errors="coerce")
+        ).dt.days.dropna(),
+
+        "pre_mri_to_mrireport": (
+            pd.to_datetime(pre_mri_to_mrireport["Date MRI reported"], dayfirst=True, errors="coerce")
+            - pd.to_datetime(pre_mri_to_mrireport["Date of MRI"], dayfirst=True, errors="coerce")
+        ).dt.days.dropna(),
+
+        "pre_mrirep_to_biopsymdt": (
+            pd.to_datetime(pre_mrirep_to_biopsymdt["Date of Prostate MRI MDT"], dayfirst=True, errors="coerce")
+            - pd.to_datetime(pre_mrirep_to_biopsymdt["Date MRI reported"], dayfirst=True, errors="coerce")
+        ).dt.days.dropna(),
+
+        "pre_biopmdt_to_biop": (
+            pd.to_datetime(pre_biopmdt_to_biop["Date of Biopsy"], dayfirst=True, errors="coerce")
+            - pd.to_datetime(pre_biopmdt_to_biop["Date of Prostate MRI MDT"], dayfirst=True, errors="coerce")
+        ).dt.days.dropna(),
+
+        "pre_biop_to_pathrep": (
+            pd.to_datetime(pre_biop_to_pathrep["Date of pathology report"], dayfirst=True, errors="coerce")
+            - pd.to_datetime(pre_biop_to_pathrep["Date of Biopsy"], dayfirst=True, errors="coerce")
+        ).dt.days.dropna(),
+
+        "pre_pathrep_to_treatmdt": (
+            pd.to_datetime(pre_pathrep_to_treatmdt["Date of MDT (treatment options)"], dayfirst=True, errors="coerce")
+            - pd.to_datetime(pre_pathrep_to_treatmdt["Date of pathology report"], dayfirst=True, errors="coerce")
+        ).dt.days.dropna(),
+
+        "pre_treatmdt_to_outpat": (
+            pd.to_datetime(pre_treatmdt_to_outpat["Date of outpat appt"], dayfirst=True, errors="coerce")
+            - pd.to_datetime(pre_treatmdt_to_outpat["Date of MDT (treatment options)"], dayfirst=True, errors="coerce")
+        ).dt.days.dropna(),
+    }
+
+    return pdfs

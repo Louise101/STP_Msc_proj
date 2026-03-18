@@ -3,7 +3,7 @@ import numpy as np
 import sys
 from typing import Optional, Dict, Any
 
-from PDF_create import build_pdfs, build_branching
+from PDF_create import build_pdfs, build_branching, build_pdfs2
 from sampling import sample_empirical_ecdf, sample_outcome,sample_mri_to_report_correlated
 
 
@@ -36,6 +36,8 @@ def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = No
    # ALPHA = 0.4  # try 0.4 first; tune later
 
     pdfs = build_pdfs()
+    #exclude_np053_ref_to_mri: bool = True,
+    #pdfs = build_pdfs2(exclude_np053_ref_to_mri=exclude_np053_ref_to_mri)
     branching = build_branching()
    
 

@@ -6,7 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from single_walk_mdt_day import trace_one_patient_mdtday
-from PDF_create import build_pdfs, build_branching
+from PDF_create import build_pdfs, build_branching, build_pdfs2
 
 
 # ============================================================
@@ -91,6 +91,7 @@ def simulate_n_patients(
     start_date: dt.date,
     seed: int = 42,
     keep_event_log: bool = True,
+    exclude_np053_ref_to_mri: bool = False,
 ):
     master_rng = np.random.default_rng(seed)
 
@@ -98,6 +99,7 @@ def simulate_n_patients(
     all_events = []
 
     pdfs = build_pdfs()
+   # pdfs = build_pdfs2(exclude_np053_ref_to_mri=exclude_np053_ref_to_mri)
     branching = build_branching()
 
     for i in range(n):
@@ -191,6 +193,7 @@ def print_basic_summaries(results_df: pd.DataFrame):
 
 
 if __name__ == "__main__":
+    # Main model
     results_df, events_df, sim_waits = simulate_n_patients(
         n=10000,
         start_date=dt.date(2026, 1, 5),
@@ -198,6 +201,7 @@ if __name__ == "__main__":
         keep_event_log=True,
     )
 
+   
     print(results_df.head())
     print_basic_summaries(results_df)
     plot_total_days(results_df, title="Simulated total pathway time (n=10000, seed=42)")
@@ -215,3 +219,5 @@ if __name__ == "__main__":
     print(RESULTS_FILE)
     print(EVENTS_FILE)
     print(WAITS_FILE)
+
+ 
