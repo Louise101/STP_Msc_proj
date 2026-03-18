@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import pandas as pd
 
 from sampling import (
     sample_empirical_ecdf,
@@ -12,70 +13,80 @@ from sampling import (
 # ECDF sampler tests
 
 def test_empirical_ecdf_returns_value_from_samples():
-    samples = np.array([5, 10, 10, 20, 30])
+    samples = pd.Series([5, 10, 10, 20, 30])
     rng = np.random.default_rng(123)
 
-    draw = sample_empirical_ecdf(samples, n=1, rng=rng, integer=True)
+    draw = sample_empirical_ecdf(samples, rng=rng)
 
     # draw should be one of the observed values (after sorting)
-    assert draw in set(samples.tolist())
+    assert draw in samples.values
 
 
 def test_empirical_ecdf_handles_nans():
-    samples = np.array([np.nan, 5, 10, np.nan, 20])
+    samples = pd.Series([np.nan, 5, 10, np.nan, 20])
     rng = np.random.default_rng(1)
 
-    draws = sample_empirical_ecdf(samples, n=50, rng=rng, integer=True)
+    draws = [sample_empirical_ecdf(samples, rng=rng) for _ in range(50)]
 
     # should never return NaN
     assert not np.isnan(draws).any()
     # should only return values that exist in non-NaN set
     assert set(np.unique(draws)).issubset({5, 10, 20})
+    assert all(d in [5, 10, 20] for d in draws)
 
 
 def test_empirical_ecdf_raises_on_all_nan():
-    samples = np.array([np.nan, np.nan])
+    samples = pd.Series([np.nan, np.nan])
     rng = np.random.default_rng(1)
 
     with pytest.raises(ValueError):
-        sample_empirical_ecdf(samples, n=1, rng=rng)
+        sample_empirical_ecdf(samples, rng=rng)
 
-
-def test_empirical_ecdf_negative_values_rejected_by_default():
-    samples = np.array([1, 2, -3, 4])
-
-    with pytest.raises(ValueError):
-        sample_empirical_ecdf(samples, n=1)
-
-
-def test_empirical_ecdf_can_allow_negative_if_configured():
-    samples = np.array([1, 2, -3, 4])
-    rng = np.random.default_rng(2)
-
-    draw = sample_empirical_ecdf(samples, n=1, rng=rng, nonnegative=False, integer=True)
-
-    assert draw in set(samples.tolist())
-
-
-def test_empirical_ecdf_returns_array_of_correct_length():
-    samples = np.array([1, 2, 3, 4, 5])
+def test_empirical_ecdf_returns_int():
+    samples = pd.Series([1, 2, 3, 4, 5])
     rng = np.random.default_rng(42)
 
-    draws = sample_empirical_ecdf(samples, n=100, rng=rng)
-    assert isinstance(draws, np.ndarray)
-    assert len(draws) == 100
+    draw = sample_empirical_ecdf(samples, rng=rng)
 
+    assert isinstance(draw, int)
 
 def test_empirical_ecdf_reproducible_with_same_seed():
-    samples = np.array([3, 7, 9, 12, 20])
+    samples = pd.Series([3, 7, 9, 12, 20])
 
     rng1 = np.random.default_rng(999)
     rng2 = np.random.default_rng(999)
 
-    d1 = sample_empirical_ecdf(samples, n=25, rng=rng1)
-    d2 = sample_empirical_ecdf(samples, n=25, rng=rng2)
+    d1 = [sample_empirical_ecdf(samples, rng=rng1) for _ in range(25)]
+    d2 = [sample_empirical_ecdf(samples, rng=rng2) for _ in range(25)]
 
-    assert np.array_equal(d1, d2)
+    assert d1 == d2
+
+
+def test_empirical_ecdf_can_use_fixed_u():
+    samples = pd.Series([10, 20, 30, 40, 50])
+    rng = np.random.default_rng(123)
+
+    d1 = sample_empirical_ecdf(samples, rng=rng, u=0.5)
+    d2 = sample_empirical_ecdf(samples, rng=rng, u=0.5)
+
+    assert d1 == d2
+
+
+def test_empirical_ecdf_multiple_draws_are_correct_length():
+    samples = pd.Series([1, 2, 3, 4, 5])
+    rng = np.random.default_rng(42)
+
+    draws = [sample_empirical_ecdf(samples, rng=rng) for _ in range(100)]
+
+    assert len(draws) == 100
+
+def test_empirical_ecdf_fixed_u_hits_expected_value():
+    samples = pd.Series([10, 20, 30, 40])
+    rng = np.random.default_rng(1)
+
+    draw = sample_empirical_ecdf(samples, rng=rng, u=0.0)
+
+    assert draw == 10
 
 
 
