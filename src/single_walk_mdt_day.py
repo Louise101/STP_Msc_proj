@@ -30,7 +30,8 @@ def next_allowed_weekday(d: dt.date, allowed_weekdays: set[int]) -> dt.date:
 BIOPMDT_DAYS = {2}   # Wednesday
 TREATMDT_DAYS = {4}  # Friday
 #def trace_one_patient(start_date: dt.date, rng: np.random.Generator, patient_id: str = "VP0001"):
-def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = None, branching: Optional[dict] = None, patient_id="VP0001"):
+def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = None, branching: Optional[dict] = None, patient_id="VP0001", overrides=None):
+    overrides = overrides or {}
 
    # u_patient = rng.random()
    # ALPHA = 0.4  # try 0.4 first; tune later
@@ -53,10 +54,17 @@ def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = No
     #t_ref_to_mri = sample_empirical_ecdf(pdfs["pre_referral_to_mri"], rng=rng)
     #from sampling import correlated_u
     #u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
-    t_ref_to_mri = sample_empirical_ecdf(pdfs["pre_referral_to_mri"], rng=rng)
-    mri_date_raw = referral_date + dt.timedelta(days=int(t_ref_to_mri))
-    mri_date = next_weekday(mri_date_raw)  # apply weekday constraint 
-    log.append({"patient_id": patient_id, "event": "mri_performed", "date": mri_date, "wait_days": int(t_ref_to_mri)})
+
+    # add in DES queue option 
+    if "wait_ref_to_mri" in overrides:
+        wait_ref_to_mri = overrides["wait_ref_to_mri"]
+        mri_date = overrides.get("mri_date", referral_date + dt.timedelta(days=wait_ref_to_mri))
+        log.append({"patient_id": patient_id, "event": "mri_performed", "date": mri_date, "wait_days": int(wait_ref_to_mri)})
+    else:
+        wait_ref_to_mri = sample_empirical_ecdf(pdfs["pre_referral_to_mri"], rng=rng)
+        mri_date_raw = referral_date + dt.timedelta(days=int(wait_ref_to_mri))
+        mri_date = next_weekday(mri_date_raw)  # apply weekday constraint 
+        log.append({"patient_id": patient_id, "event": "mri_performed", "date": mri_date, "wait_days": int(wait_ref_to_mri)})
 
     # Step 3: MRI -> Report
    # t_mri_to_report = sample_empirical_ecdf(pdfs["pre_mri_to_mrireport"], rng=rng)
@@ -64,7 +72,7 @@ def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = No
     #u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
    # t_mri_to_report = sample_empirical_ecdf(pdfs["pre_mri_to_mrireport"], rng=rng)
     t_mri_to_report = sample_mri_to_report_correlated(
-    ref_to_mri_wait=t_ref_to_mri,
+    ref_to_mri_wait=wait_ref_to_mri,
     ref_to_mri_samples=pdfs["pre_referral_to_mri"],
     mri_to_report_samples=pdfs["pre_mri_to_mrireport"],
     rng=rng,
