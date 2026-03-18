@@ -6,7 +6,7 @@ cfg = EngineConfig(
     start_date=date(2024, 1, 1),
     n_days=365,
     lam_per_workday=0.586, #calculated in poisson_calc.py
-    mri_slots_per_workday=6,
+    mri_capacity_by_weekday= {1: 6}, #6 slots on day 1 (Tuesday)
     seed=42,
     wait_time_mode={
         "ref_to_mri": WAIT_MODE_DES,   # use for DES queue
@@ -16,3 +16,4 @@ cfg = EngineConfig(
 
 results = run_day_loop_with_mri_queue(cfg, trace_one_patient_mdtday)
 print(results["summary_stats"])
+

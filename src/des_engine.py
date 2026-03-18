@@ -18,7 +18,7 @@ class EngineConfig:
     start_date: date
     n_days: int
     lam_per_workday: float
-    mri_slots_per_workday: int
+    mri_capacity_by_weekday: Dict[int, int]
     seed: int = 1234
 
     # stage switches
@@ -33,6 +33,15 @@ class Patient:
 
 def is_weekday(d: date) -> bool:
     return d.weekday() < 5
+
+def get_mri_capacity_for_day(current_date):
+    """
+    Return MRI slots available on a given day.
+    Python weekday: Monday=0, Tuesday=1, ..., Sunday=6
+    """
+    if current_date.weekday() == 1:   # Tuesday
+        return 6
+    return 0
 
 
 def run_day_loop_with_mri_queue(
@@ -100,8 +109,9 @@ def run_day_loop_with_mri_queue(
         mri_started_today = 0
         waits_today: List[int] = []
 
-        if cfg.wait_time_mode.get("ref_to_mri", WAIT_MODE_MC) == WAIT_MODE_DES and is_weekday(current_date):
-            capacity = int(cfg.mri_slots_per_workday)
+        if cfg.wait_time_mode.get("ref_to_mri", WAIT_MODE_MC) == WAIT_MODE_DES:
+            capacity = cfg.mri_capacity_by_weekday.get(current_date.weekday(), 0)
+
             while capacity > 0 and mri_queue:
                 p = mri_queue.popleft()
                 capacity -= 1
@@ -136,7 +146,7 @@ def run_day_loop_with_mri_queue(
         "total_days": cfg.n_days,
         "total_patients_completed": len(patient_results),
         "lambda_target": cfg.lam_per_workday,
-        "mri_slots_per_workday": cfg.mri_slots_per_workday,
+        "mri_slots_per_workday": cfg.mri_capacity_by_weekday,
         "final_mri_queue_length": len(mri_queue),
         "mean_mri_queue_wait_days": float(np.mean(all_waits)) if all_waits else None,
         "median_mri_queue_wait_days": float(np.median(all_waits)) if all_waits else None,
