@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
-from collections import deque
-from typing import Callable, Optional, Any, Dict, List, Deque, Tuple
+from typing import Callable, Optional, Any, Dict, List
 
 import numpy as np
 
+from queue_resource import QueuePatient, QueueResource
 from sampling import sample_poisson_weekday_only
 
 WAIT_MODE_MC = "MC"
@@ -20,28 +20,7 @@ class EngineConfig:
     lam_per_workday: float
     mri_capacity_by_weekday: Dict[int, int]
     seed: int = 1234
-
-    # stage switches
-    wait_time_mode: Dict[str, str] = None  # e.g. {"ref_to_mri": "DES", ...}
-
-
-@dataclass
-class Patient:
-    pid: int
-    referral_date: date
-
-
-def is_weekday(d: date) -> bool:
-    return d.weekday() < 5
-
-def get_mri_capacity_for_day(current_date):
-    """
-    Return MRI slots available on a given day.
-    Python weekday: Monday=0, Tuesday=1, ..., Sunday=6
-    """
-    if current_date.weekday() == 1:   # Tuesday
-        return 6
-    return 0
+    wait_time_mode: Dict[str, str] | None = None
 
 
 def run_day_loop_with_mri_queue(
@@ -52,111 +31,111 @@ def run_day_loop_with_mri_queue(
 ) -> Dict[str, Any]:
     """
     Day-loop engine:
-      - Poisson weekday-only arrivals
-      - Optional DES MRI queue producing wait_ref_to_mri (ref->MRI)
-      - Otherwise uses MC sampling inside single_walk_fn
-
-    Assumptions:
-      - single_walk_fn accepts (patient_id, referral_date, rng, overrides=dict)
-      - overrides can contain {"wait_ref_to_mri": int, "mri_date": date}
-        (You can adjust names to match your code.)
+      - weekday-only Poisson arrivals
+      - optional DES queue for the ref->MRI stage
+      - otherwise MC sampling inside single_walk_fn
     """
 
-    if cfg.wait_time_mode is None:
-        cfg.wait_time_mode = {"ref_to_mri": WAIT_MODE_MC}
-
+    wait_time_mode = cfg.wait_time_mode or {"ref_to_mri": WAIT_MODE_MC}
     rng = rng or np.random.default_rng(cfg.seed)
 
-    # ---- State ----
-    mri_queue: Deque[Patient] = deque()
+    mri_resource = QueueResource(
+        name="MRI",
+        capacity_by_weekday=cfg.mri_capacity_by_weekday,
+    )
+
     patient_results: List[Any] = []
     daily_referrals: Dict[date, int] = {}
-    daily_mri_started: Dict[date, int] = {}
-    daily_mri_queue_len: Dict[date, int] = {}
-    daily_mri_waits: Dict[date, List[int]] = {}  # waits of patients who got MRI that day
 
     next_pid = 1
     current_date = cfg.start_date
 
     for _ in range(cfg.n_days):
         # 1) ARRIVALS
-        n_new = sample_poisson_weekday_only(cfg.lam_per_workday, current_date.weekday(), rng=rng)
+        n_new = sample_poisson_weekday_only(
+            lam_per_workday=cfg.lam_per_workday,
+            weekday=current_date.weekday(),
+            rng=rng,
+        )
         daily_referrals[current_date] = n_new
 
-        new_patients = []
-        for _i in range(n_new):
-            p = Patient(pid=next_pid, referral_date=current_date)
-            next_pid += 1
-            new_patients.append(p)
+        new_patients = [
+            QueuePatient(patient_id=next_pid + i, referral_date=current_date)
+            for i in range(n_new)
+        ]
+        next_pid += n_new
 
-        # 2) ROUTE arrivals depending on MRI wait-time mode
-        # If ref->MRI is DES, patients enter MRI queue now.
-        # If ref->MRI is MC, we run them immediately using MC sampling.
-        if cfg.wait_time_mode.get("ref_to_mri", WAIT_MODE_MC) == WAIT_MODE_DES:
-            mri_queue.extend(new_patients)
+        # 2) ROUTE ARRIVALS
+        if wait_time_mode.get("ref_to_mri") == WAIT_MODE_DES:
+            mri_resource.add_patients(new_patients)
         else:
-            # run immediately, no queue
             for p in new_patients:
                 out = single_walk_fn(
-                    patient_id=p.pid,
+                    patient_id=p.patient_id,
                     start_date=p.referral_date,
                     rng=rng,
-                    overrides={},# no override
+                    overrides={},
                 )
                 patient_results.append(out)
 
-        # 3) MRI SERVICE (only matters if DES mode)
-        mri_started_today = 0
-        waits_today: List[int] = []
+            # populate empty resource stats for this day in MC mode
+            mri_resource.daily_started[current_date] = 0
+            mri_resource.daily_queue_len[current_date] = 0
+            mri_resource.daily_waits[current_date] = []
 
-        if cfg.wait_time_mode.get("ref_to_mri", WAIT_MODE_MC) == WAIT_MODE_DES:
-            capacity = cfg.mri_capacity_by_weekday.get(current_date.weekday(), 0)
+        # 3) RESOURCE SERVICE
+        if wait_time_mode.get("ref_to_mri") == WAIT_MODE_DES:
+            started_today = mri_resource.process_day(current_date)
 
-            while capacity > 0 and mri_queue:
-                p = mri_queue.popleft()
-                capacity -= 1
-                mri_started_today += 1
-
-                wait_days = (current_date - p.referral_date).days
-                waits_today.append(wait_days)
+            for event in started_today:
+                p = event.patient
+                wait_days = event.wait_days
+                start_day = event.start_date
 
                 overrides = {
                     "wait_ref_to_mri": wait_days,
-                    "mri_date": current_date,
+                    "mri_date": start_day,
                 }
 
                 out = single_walk_fn(
-                    patient_id=p.pid,
+                    patient_id=p.patient_id,
                     start_date=p.referral_date,
                     rng=rng,
                     overrides=overrides,
                 )
                 patient_results.append(out)
 
-        daily_mri_started[current_date] = mri_started_today
-        daily_mri_queue_len[current_date] = len(mri_queue)
-        daily_mri_waits[current_date] = waits_today
-
-        # 4) ADVANCE DAY
         current_date += timedelta(days=1)
 
-    # ---- summary stats ----
-    all_waits = [w for waits in daily_mri_waits.values() for w in waits]
-    summary = {
+    all_waits = [w for waits in mri_resource.daily_waits.values() for w in waits]
+
+    summary_stats = {
         "total_days": cfg.n_days,
         "total_patients_completed": len(patient_results),
         "lambda_target": cfg.lam_per_workday,
-        "mri_slots_per_workday": cfg.mri_capacity_by_weekday,
-        "final_mri_queue_length": len(mri_queue),
-        "mean_mri_queue_wait_days": float(np.mean(all_waits)) if all_waits else None,
-        "median_mri_queue_wait_days": float(np.median(all_waits)) if all_waits else None,
+        "capacity_by_resource": {
+            "MRI": cfg.mri_capacity_by_weekday,
+        },
+        "final_queue_length_by_resource": {
+            "MRI": mri_resource.queue_length(),
+        },
+        "mean_queue_wait_days_by_resource": {
+            "MRI": float(np.mean(all_waits)) if all_waits else None,
+        },
+        "median_queue_wait_days_by_resource": {
+            "MRI": float(np.median(all_waits)) if all_waits else None,
+        },
     }
 
     return {
         "patient_results": patient_results,
         "daily_referrals": daily_referrals,
-        "daily_mri_started": daily_mri_started,
-        "daily_mri_queue_len": daily_mri_queue_len,
-        "daily_mri_waits": daily_mri_waits,
-        "summary_stats": summary,
+        "resources": {
+            "MRI": {
+                "daily_started": mri_resource.daily_started,
+                "daily_queue_len": mri_resource.daily_queue_len,
+                "daily_waits": mri_resource.daily_waits,
+            }
+        },
+        "summary_stats": summary_stats,
     }
