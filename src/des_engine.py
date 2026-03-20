@@ -97,6 +97,19 @@ def run_day_loop_with_mri_queue(
                     "mri_date": start_day,
                 }
 
+                if wait_time_mode.get("mri_to_report") == WAIT_MODE_DES:
+                    overrides["wait_mri_to_report"] = 1
+                    overrides["report_date"] = start_day + timedelta(days=1)
+
+                if wait_time_mode.get("report_to_biopmdt") == WAIT_MODE_DES:
+                    overrides["wait_report_to_biopmdt"] = 0
+
+                # if report is DES, use that report date
+                    if "report_date" in overrides:
+                         overrides["biopmdt_date"] = overrides["report_date"]
+                    else:
+                        overrides["biopmdt_date"] = start_day + timedelta(days=1)
+
                 out = single_walk_fn(
                     patient_id=p.patient_id,
                     start_date=p.referral_date,

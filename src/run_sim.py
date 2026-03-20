@@ -11,6 +11,11 @@ cfg = EngineConfig(
     wait_time_mode={
         "ref_to_mri": WAIT_MODE_DES,   # use for DES queue
        # "ref_to_mri": WAIT_MODE_MC, # use for MC sampling
+       "mri_to_repot": WAIT_MODE_DES,
+       #"mri_to_repot": WAIT_MODE_MC,
+       "report_to_biopmdt": WAIT_MODE_DES,
+       #"report_to_biopmdt": WAIT_MODE_MC,
+
     }
 )
 

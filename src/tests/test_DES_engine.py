@@ -23,6 +23,10 @@ def fake_single_walk_fn(patient_id, start_date, rng=None, overrides=None):
         "start_date": start_date,
         "wait_ref_to_mri": overrides.get("wait_ref_to_mri", "MC_USED"),
         "mri_date": overrides.get("mri_date", None),
+        "wait_mri_to_report": overrides.get("wait_mri_to_report", "MC_USED"),
+        "report_date": overrides.get("report_date", None),
+        "wait_report_to_biopmdt": overrides.get("wait_report_to_biopmdt", "MC_USED"),
+        "biopmdt_date": overrides.get("biopmdt_date", None),
     }
 
 
@@ -375,6 +379,146 @@ def test_real_single_walk_runs_in_des_mode():
         mri_capacity_by_weekday={1: 6},
         seed=42,
         wait_time_mode={"ref_to_mri": WAIT_MODE_DES},
+    )
+
+    results = run_day_loop_with_mri_queue(cfg, trace_one_patient_mdtday)
+    assert isinstance(results, dict)
+
+def test_des_mri_to_report_sets_report_one_day_after_mri():
+    cfg = EngineConfig(
+        start_date=date(2024, 1, 1),
+        n_days=14,
+        lam_per_workday=1.0,
+        mri_capacity_by_weekday={1: 6},   # Tuesday only
+        seed=42,
+        wait_time_mode={
+            "ref_to_mri": WAIT_MODE_DES,
+            "mri_to_report": WAIT_MODE_DES,
+        },
+    )
+
+    results = run_day_loop_with_mri_queue(cfg, fake_single_walk_fn)
+
+    completed = results["patient_results"]
+    assert len(completed) > 0
+
+    for p in completed:
+        assert p["mri_date"] is not None
+        assert p["report_date"] is not None
+        assert p["wait_mri_to_report"] == 1
+        assert (p["report_date"] - p["mri_date"]).days == 1
+
+def test_des_report_to_biopmdt_sets_biopmdt_same_day_as_report():
+    cfg = EngineConfig(
+        start_date=date(2024, 1, 1),
+        n_days=14,
+        lam_per_workday=1.0,
+        mri_capacity_by_weekday={1: 6},
+        seed=42,
+        wait_time_mode={
+            "ref_to_mri": WAIT_MODE_DES,
+            "mri_to_report": WAIT_MODE_DES,
+            "report_to_biopmdt": WAIT_MODE_DES,
+        },
+    )
+
+    results = run_day_loop_with_mri_queue(cfg, fake_single_walk_fn)
+
+    completed = results["patient_results"]
+    assert len(completed) > 0
+
+    for p in completed:
+        assert p["report_date"] is not None
+        assert p["biopmdt_date"] is not None
+        assert p["wait_report_to_biopmdt"] == 0
+        assert p["biopmdt_date"] == p["report_date"]
+
+def test_des_mri_to_biopmdt_total_delay_is_one_day_when_both_overrides_active():
+    cfg = EngineConfig(
+        start_date=date(2024, 1, 1),
+        n_days=14,
+        lam_per_workday=1.0,
+        mri_capacity_by_weekday={1: 6},
+        seed=42,
+        wait_time_mode={
+            "ref_to_mri": WAIT_MODE_DES,
+            "mri_to_report": WAIT_MODE_DES,
+            "report_to_biopmdt": WAIT_MODE_DES,
+        },
+    )
+
+    results = run_day_loop_with_mri_queue(cfg, fake_single_walk_fn)
+
+    completed = results["patient_results"]
+    assert len(completed) > 0
+
+    for p in completed:
+        assert p["mri_date"] is not None
+        assert p["biopmdt_date"] is not None
+        assert (p["biopmdt_date"] - p["mri_date"]).days == 1
+
+def test_mixed_mode_des_mri_to_report_but_report_to_biopmdt_remains_mc():
+    cfg = EngineConfig(
+        start_date=date(2024, 1, 1),
+        n_days=14,
+        lam_per_workday=1.0,
+        mri_capacity_by_weekday={1: 6},
+        seed=42,
+        wait_time_mode={
+            "ref_to_mri": WAIT_MODE_DES,
+            "mri_to_report": WAIT_MODE_DES,
+            "report_to_biopmdt": WAIT_MODE_MC,
+        },
+    )
+
+    results = run_day_loop_with_mri_queue(cfg, fake_single_walk_fn)
+
+    completed = results["patient_results"]
+    assert len(completed) > 0
+
+    for p in completed:
+        assert p["wait_mri_to_report"] == 1
+        assert p["report_date"] is not None
+
+        # this stage should not be overridden
+        assert p["wait_report_to_biopmdt"] == "MC_USED"
+        assert p["biopmdt_date"] is None
+
+def test_des_report_to_biopmdt_can_set_date_even_without_des_report_override():
+    cfg = EngineConfig(
+        start_date=date(2024, 1, 1),
+        n_days=14,
+        lam_per_workday=1.0,
+        mri_capacity_by_weekday={1: 6},
+        seed=42,
+        wait_time_mode={
+            "ref_to_mri": WAIT_MODE_DES,
+            "mri_to_report": WAIT_MODE_MC,
+            "report_to_biopmdt": WAIT_MODE_DES,
+        },
+    )
+
+    results = run_day_loop_with_mri_queue(cfg, fake_single_walk_fn)
+
+    completed = results["patient_results"]
+    assert len(completed) > 0
+
+    for p in completed:
+        assert p["wait_report_to_biopmdt"] == 0
+        assert p["biopmdt_date"] is not None
+
+def test_real_single_walk_runs_with_des_report_and_biopmdt_overrides():
+    cfg = EngineConfig(
+        start_date=date(2024, 1, 1),
+        n_days=10,
+        lam_per_workday=1.0,
+        mri_capacity_by_weekday={1: 6},
+        seed=42,
+        wait_time_mode={
+            "ref_to_mri": WAIT_MODE_DES,
+            "mri_to_report": WAIT_MODE_DES,
+            "report_to_biopmdt": WAIT_MODE_DES,
+        },
     )
 
     results = run_day_loop_with_mri_queue(cfg, trace_one_patient_mdtday)
