@@ -134,12 +134,23 @@ def trace_one_patient_mdtday(start_date: dt.date, rng, pdfs: Optional[dict] = No
 
     # Step 6: Continue depending on outcome
     if outcome == 1: # biopsy # MDT -> Biopsy
+        if "wait_biopmdt_to_biopsy" in overrides:
+            t_mdt_to_biopsy = overrides["wait_biopmdt_to_biopsy"] 
+            biopsy_date = overrides.get(
+            "biopsy_date",
+            MDT_date + dt.timedelta(days=t_mdt_to_biopsy ))
+            log.append({"patient_id": patient_id, "event": "biopsy_done", "date": biopsy_date, "wait_days": int(t_mdt_to_biopsy)})
+        else:
+            t_mdt_to_biopsy = sample_empirical_ecdf(pdfs["pre_biopmdt_to_biop"], rng=rng)
+            biopsy_date_raw = MDT_date + dt.timedelta(days=int(t_mdt_to_biopsy))
+            biopsy_date = next_weekday(biopsy_date_raw)
+            log.append({"patient_id": patient_id, "event": "biopsy_done", "date": biopsy_date, "wait_days": int(t_mdt_to_biopsy)})
         #t_mdt_to_biopsy = sample_empirical_ecdf(pdfs["pre_biopmdt_to_biop"], rng=rng)
        # u = correlated_u(u_patient, rng=rng, alpha=ALPHA)
-        t_mdt_to_biopsy = sample_empirical_ecdf(pdfs["pre_biopmdt_to_biop"], rng=rng)
-        biopsy_date_raw = MDT_date + dt.timedelta(days=int(t_mdt_to_biopsy))
-        biopsy_date = next_weekday(biopsy_date_raw)
-        log.append({"patient_id": patient_id, "event": "biopsy_done", "date": biopsy_date, "wait_days": int(t_mdt_to_biopsy)})
+       # t_mdt_to_biopsy = sample_empirical_ecdf(pdfs["pre_biopmdt_to_biop"], rng=rng)
+        #biopsy_date_raw = MDT_date + dt.timedelta(days=int(t_mdt_to_biopsy))
+        #biopsy_date = next_weekday(biopsy_date_raw)
+        #log.append({"patient_id": patient_id, "event": "biopsy_done", "date": biopsy_date, "wait_days": int(t_mdt_to_biopsy)})
         #end_date = biopsy_date
     else:
         # discharge / surveillance etc
