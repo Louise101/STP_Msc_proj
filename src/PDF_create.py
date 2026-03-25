@@ -122,6 +122,8 @@ def build_pdfs(data_dir: Path = DATA_DIR):
     df2["q_obs"] = df2["w_obs"] - df2["s_obs"]
     queue_pdf_pathrep_to_treatmdt = df2.loc[df2["q_obs"] >= 0, "q_obs"].astype(int)
 
+    biopsy_residual_samples = pd.read_csv("biopsy_residual_samples_orig.csv") #file made in biop_queue_cal.py when no residual MC compnenet added to DES engine biop wait, biop delay set to 1 and capacity to {{3: 2, 4: 1}}
+   #biopsy_residual_samples = pd.read_csv("biopsy_residual_samples.csv") #file made in biop_queue_cal.py when no residual MC compnenet added to DES engine biop wait, biop delay set to 1 and capacity to {{3: 2, 4: 1}}
     return {
         "pre_referral_to_mri": pdf_pre_ref_to_mri,
         "pre_mri_to_mrireport": pdf_pre_mri_to_mrireport,
@@ -132,6 +134,8 @@ def build_pdfs(data_dir: Path = DATA_DIR):
         "pre_treatmdt_to_outpat": pdf_pre_treatmdt_to_outpat,
         "queue_mrirep_to_biopsymdt": queue_pdf_mrirep_to_biopmdt,
         "queue_pathrep_to_treatmdt": queue_pdf_pathrep_to_treatmdt,
+        "biopsy_residual_samples": biopsy_residual_samples
+        
     }
 
 
@@ -241,6 +245,8 @@ def build_pdfs2(exclude_np053_ref_to_mri: bool = True):
     pre_pathrep_to_treatmdt = pd.read_csv(DATA_DIR / "pre_pathrep_to_treatmdt.csv")
     pre_treatmdt_to_outpat = pd.read_csv(DATA_DIR / "pre_treatmdt_to_outpat.csv")
 
+    
+
     # Optional sensitivity exclusion
     if exclude_np053_ref_to_mri:
         pre_ref_to_mri = pre_ref_to_mri.loc[
@@ -282,6 +288,8 @@ def build_pdfs2(exclude_np053_ref_to_mri: bool = True):
             pd.to_datetime(pre_treatmdt_to_outpat["Date of outpat appt"], dayfirst=True, errors="coerce")
             - pd.to_datetime(pre_treatmdt_to_outpat["Date of MDT (treatment options)"], dayfirst=True, errors="coerce")
         ).dt.days.dropna(),
+
+
     }
 
     return pdfs
