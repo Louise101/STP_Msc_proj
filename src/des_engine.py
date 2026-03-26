@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import Callable, Optional, Any, Dict, List
+from typing import Callable, Optional, Any, Dict, List, Tuple
 
 import numpy as np
 
@@ -24,9 +24,62 @@ class EngineConfig:
     lam_per_workday: float
     mri_capacity_by_weekday: Dict[int, int]
     biopsy_capacity_by_weekday: Dict[int, int]
-    biopsy_ready_delay_days: int = 1
+    biopsy_ready_delay_days: int = 0
     seed: int = 1234
     wait_time_mode: Dict[str, str] | None = None
+
+    initial_biopsy_queue_n: int =  1 #add some inital backlog to the biopsy queue
+    initial_biopsy_pending_n: int = 2
+
+    #biopsy_capacity_dropout_prob_by_weekday: Dict[int, float] | None = None
+    biopsy_capacity_dropout_prob_by_weekday= {3: 0.2, 4:0.3} #Thursdays slot only happens 70% of time
+
+   # biopsy_backlog_threshold: int | None = None
+    #biopsy_capacity_if_backlogged_by_weekday: Dict[int, int] | None = None
+
+    #biopsy_backlog_threshold=11
+    #biopsy_capacity_if_backlogged_by_weekday={3:2,4:1}
+
+    # NEW: list of (threshold, capacity_map)
+    #biopsy_backlog_capacity_tiers: List[Tuple[int, Dict[int, int]]] = field(default_factory=list)
+
+    biopsy_backlog_capacity_tiers = [
+    (6,  {3: 2, 4: 1}),  # if backlog >= 9
+    (10, {3: 2, 4: 2}),  # if backlog >= 11
+]
+
+
+
+
+def effective_biopsy_capacity_map(
+    base_map: Dict[int, int],
+    dropout_probs: Dict[int, float] | None,
+    current_date: date,
+    rng: np.random.Generator,
+    backlog: int,
+    backlog_capacity_tiers: List[tuple[int, Dict[int, int]]] | None,
+) -> Dict[int, int]:
+    """
+    Choose effective biopsy capacity map based on backlog tiers,
+    then optionally apply dropout for the current weekday.
+    """
+    cap_map = dict(base_map)
+
+    if backlog_capacity_tiers:
+        # apply the highest matching threshold
+        for threshold, tier_map in sorted(backlog_capacity_tiers, key=lambda x: x[0]):
+            if backlog >= threshold:
+                cap_map = dict(tier_map)
+
+    # apply dropout after selecting capacity map
+    if dropout_probs:
+        wd = current_date.weekday()
+        if wd in cap_map and wd in dropout_probs:
+            if rng.random() < dropout_probs[wd]:
+                cap_map[wd] = 0
+
+    return cap_map
+
 
 
 def run_day_loop_with_stage_engine(
@@ -75,8 +128,59 @@ def run_day_loop_with_stage_engine(
     #pending_biopsy_arrivals: Dict[date, List[QueuePatient]] = {}
 
     next_pid = 1
-    current_date = cfg.start_date
 
+
+
+    # Seed initial biopsy queue backlog
+    for _ in range(cfg.initial_biopsy_queue_n):
+        seeded_patient = PatientState(
+            patient_id=next_pid,
+            start_date=cfg.start_date - timedelta(days=30),
+            current_date=cfg.start_date - timedelta(days=7),
+            current_stage="downstream_tail",
+        )
+        next_pid += 1
+
+        biopmdt_date = cfg.start_date - timedelta(days=7)
+        seeded_patient.data["biopmdt_date"] = biopmdt_date
+        seeded_patient.add_event("MDT_occured", biopmdt_date, wait_days=0)
+        seeded_patient.add_event("mdt_decision", biopmdt_date, outcome=1)
+
+        biopsy_resource.add_patient(
+            QueuePatient(
+                patient_id=seeded_patient.patient_id,
+                referral_date=cfg.start_date,
+                payload={"patient": seeded_patient},
+            )
+        )
+
+    # Seed initial biopsy pending backlog
+    for _ in range(cfg.initial_biopsy_pending_n):
+        seeded_patient = PatientState(
+            patient_id=next_pid,
+            start_date=cfg.start_date - timedelta(days=30),
+            current_date=cfg.start_date - timedelta(days=3),
+            current_stage="downstream_tail",
+        )
+        next_pid += 1
+
+        biopmdt_date = cfg.start_date - timedelta(days=3)
+        seeded_patient.data["biopmdt_date"] = biopmdt_date
+        seeded_patient.add_event("MDT_occured", biopmdt_date, wait_days=0)
+        seeded_patient.add_event("mdt_decision", biopmdt_date, outcome=1)
+
+        ready_date = cfg.start_date #+ timedelta(days=1)
+        pending_arrivals["Biopsy"].setdefault(ready_date, []).append(
+            QueuePatient(
+                patient_id=seeded_patient.patient_id,
+                referral_date=ready_date,
+                payload={"patient": seeded_patient},
+            )
+        )
+
+
+    current_date = cfg.start_date
+    
     for _ in range(cfg.n_days):
         # 0) MOVE READY PATIENTS INTO BIOPSY QUEUE
         ready_today = pending_arrivals["Biopsy"].pop(current_date, [])
@@ -194,7 +298,30 @@ def run_day_loop_with_stage_engine(
        #     biopsy_resource.daily_waits[current_date] = []
 
         # 4) BIOPSY SERVICE
+    
         if wait_time_mode.get("biopmdt_to_biopsy", WAIT_MODE_MC) == WAIT_MODE_DES:
+            #biopsy_resource.capacity_by_weekday = effective_capacity_map(
+             #   cfg.biopsy_capacity_by_weekday or {},
+             #   cfg.biopsy_capacity_dropout_prob_by_weekday,
+              #  current_date,
+              #  rng,
+            #)
+
+            biopsy_backlog_today = (
+                biopsy_resource.queue_length()
+                + sum(len(v) for v in pending_arrivals["Biopsy"].values())
+            )
+
+            biopsy_resource.capacity_by_weekday = effective_biopsy_capacity_map(
+                base_map=cfg.biopsy_capacity_by_weekday or {},
+                dropout_probs=cfg.biopsy_capacity_dropout_prob_by_weekday,
+                current_date=current_date,
+                rng=rng,
+                backlog=biopsy_backlog_today,
+                #backlog_threshold=cfg.biopsy_backlog_threshold,
+                #backlog_capacity_map=cfg.biopsy_capacity_if_backlogged_by_weekday,
+                backlog_capacity_tiers=cfg.biopsy_backlog_capacity_tiers,
+            )
             biopsy_started_today = biopsy_resource.process_day(current_date)
 
             for event in biopsy_started_today:
@@ -244,6 +371,8 @@ def run_day_loop_with_stage_engine(
         total_days = (p.current_date - p.start_date).days
         patient_results.append((p.events, total_days))
 
+
+
     pending_biopsy_count = sum(len(v) for v in pending_arrivals["Biopsy"].values())
     summary_stats = {
         "pending_biopsy_count": pending_biopsy_count,
@@ -291,4 +420,6 @@ def run_day_loop_with_stage_engine(
         },
         "summary_stats": summary_stats,
     }
+
+
 

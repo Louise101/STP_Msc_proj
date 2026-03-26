@@ -34,6 +34,12 @@ STAGE_SEQUENCE = [
     "downstream_tail",
 ]
 
+def next_weekday(d: date) -> date:
+    # 0=Mon ... 6=Sun
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return d
+
 def advance_patient_until_pause_or_end(patient: PatientState, ctx: StageContext) -> None:
     while not patient.is_complete:
         handler = STAGE_HANDLERS[patient.current_stage]
@@ -54,7 +60,8 @@ def resume_after_mri(patient: PatientState, mri_day: date, queue_wait: int) -> N
 
 
 def resume_after_biopsy(patient: PatientState, biopsy_day: date, ctx: StageContext) -> None:
-    residual = sample_empirical_ecdf(ctx.pdfs["biopsy_residual_samples"], ctx.rng)
+    #residual = sample_empirical_ecdf(ctx.pdfs["biopsy_residual_samples"], ctx.rng)
+    residual = sample_empirical_ecdf(ctx.pdfs["pre_biopmdt_to_biop"], ctx.rng)
     final_biopsy_day = biopsy_day + timedelta(days=residual)
 
     total_wait = (final_biopsy_day - patient.data["biopmdt_date"]).days
@@ -73,7 +80,8 @@ def process_ref_to_mri(patient: PatientState, ctx: StageContext) -> str:
 
     if mode == WAIT_MODE_MC:
         wait_days = sample_empirical_ecdf(ctx.pdfs["pre_referral_to_mri"], ctx.rng)
-        mri_date = patient.current_date + timedelta(days=wait_days)
+        mri_date_raw = patient.current_date + timedelta(days=wait_days)
+        mri_date= next_weekday(mri_date_raw)
 
         patient.data["wait_ref_to_mri"] = wait_days
         patient.data["mri_date"] = mri_date
@@ -105,7 +113,8 @@ def process_mri_to_report(patient: PatientState, ctx: StageContext) -> str:
     else:
         wait_days = 1
 
-    report_date = patient.current_date + timedelta(days=wait_days)
+    report_date_raw = patient.current_date + timedelta(days=wait_days)
+    report_date = next_weekday(report_date_raw)
 
     patient.data["wait_mri_to_report"] = wait_days
     patient.data["report_date"] = report_date
@@ -125,7 +134,8 @@ def process_report_to_biopmdt(patient: PatientState, ctx: StageContext) -> str:
     else:
         wait_days = 0
 
-    biopmdt_date = patient.current_date + timedelta(days=wait_days)
+    biopmdt_date_raw = patient.current_date + timedelta(days=wait_days)
+    biopmdt_date=next_weekday(biopmdt_date_raw)
 
     patient.data["wait_report_to_biopmdt"] = wait_days
     patient.data["biopmdt_date"] = biopmdt_date
@@ -163,7 +173,8 @@ def process_biopmdt_to_biopsy(patient: PatientState, ctx: StageContext) -> str:
 
     if mode == WAIT_MODE_MC:
         wait_days = sample_empirical_ecdf(ctx.pdfs["pre_biopmdt_to_biop"], ctx.rng)
-        biopsy_date = patient.current_date + timedelta(days=wait_days)
+        biopsy_date_raw = patient.current_date + timedelta(days=wait_days)
+        biopsy_date = next_weekday(biopsy_date_raw)
 
         patient.data["wait_biopmdt_to_biopsy"] = wait_days
         patient.data["biopsy_date"] = biopsy_date
