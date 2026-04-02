@@ -15,12 +15,12 @@ cfg = EngineConfig(
     biopsy_capacity_by_weekday={3: 1, 4:1},  # Thu + Fri
     seed=42,
     wait_time_mode={
-        #"ref_to_mri": WAIT_MODE_DES,   # use for DES queue
-        "ref_to_mri": WAIT_MODE_MC, # use for MC sampling
-        #"mri_to_repot": WAIT_MODE_DES,
-       "mri_to_repot": WAIT_MODE_MC,
-       #"report_to_biopmdt": WAIT_MODE_DES,
-       "report_to_biopmdt": WAIT_MODE_MC,
+        "ref_to_mri": WAIT_MODE_DES,   # use for DES queue
+        #"ref_to_mri": WAIT_MODE_MC, # use for MC sampling
+       "mri_to_repot": WAIT_MODE_DES,
+       #"mri_to_repot": WAIT_MODE_MC,
+       "report_to_biopmdt": WAIT_MODE_DES,
+       #"report_to_biopmdt": WAIT_MODE_MC,
        "biopmdt_to_biopsy" : WAIT_MODE_DES,
       # "biopmdt_to_biopsy" : WAIT_MODE_MC,
 

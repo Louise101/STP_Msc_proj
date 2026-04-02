@@ -1,0 +1,12 @@
+metric,value
+real_mean_wait,27.92753623188406
+sim_mean_wait,29.835051546391753
+real_median_wait,23.0
+sim_median_wait,25.0
+ks_stat,0.2581801882563873
+ks_p,0.007253346935624322
+real_corr_completed_vs_prev_waiting,0.6745445484868532
+sim_corr_completed_vs_prev_queue,0.6535404137343976
+real_corr_completed_vs_demand,-0.25512813452555433
+sim_corr_completed_vs_demand,0.11227240899720181
+final_backlog_biopsy,9.0

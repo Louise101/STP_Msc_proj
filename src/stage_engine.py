@@ -155,7 +155,6 @@ def process_report_to_biopmdt(patient: PatientState, ctx: StageContext) -> str:
     patient.data["biopmdt_outcome"] = outcome
     patient.add_event("mdt_decision", biopmdt_date, outcome=outcome)
 
-    print("BIOPMDT OUTCOME:", repr(outcome), type(outcome))
 
     if outcome != 1:
         patient.is_complete = True
@@ -199,14 +198,66 @@ def process_biopmdt_to_biopsy(patient: PatientState, ctx: StageContext) -> str:
     raise ValueError(f"Unknown mode for biopmdt_to_biopsy: {mode}")
 
 
-def process_downstream_tail(patient: PatientState, ctx: StageContext) -> str:
-    """
-    Temporary placeholder:
-    keep biopsy->pathology->treatmdt->outpatient as one MC block for now.
-    """
+#def process_downstream_tail(patient: PatientState, ctx: StageContext) -> str:
+#    """
+ #   Temporary placeholder:
+  #  keep biopsy->pathology->treatmdt->outpatient as one MC block for now.
+   # """
     # You can port your current single_walk logic here gradually.
+   # patient.is_complete = True
+    #patient.add_event("pathway_end", patient.current_date)
+    #return "COMPLETE"
+
+
+def process_downstream_tail(patient: PatientState, ctx: StageContext) -> str:
+    current_date = patient.current_date
+
+    # biopsy -> pathology report
+    wait_days = sample_empirical_ecdf(ctx.pdfs["pre_biop_to_pathrep"], ctx.rng)
+    pathrep_date = next_weekday(current_date + timedelta(days=wait_days))
+
+    patient.data["wait_biopsy_to_pathrep"] = wait_days
+    patient.data["pathrep_date"] = pathrep_date
+    patient.current_date = pathrep_date
+    patient.add_event("Path_report_recieved", pathrep_date, wait_days=wait_days)
+
+    # pathology outcome
+    path_outcome = sample_outcome(ctx.branching["pathrep_outcome"], rng=ctx.rng)
+    try:
+        path_outcome = int(path_outcome)
+    except (TypeError, ValueError):
+        pass
+
+    patient.data["pathrep_outcome"] = path_outcome
+    patient.add_event("Path_report_outcome", pathrep_date, outcome=path_outcome)
+
+    # assume 1 = cancer, 0 = no cancer
+    if path_outcome != 1:
+        patient.is_complete = True
+        patient.exit_reason = "no_cancer_after_biopsy"
+        patient.add_event("pathway_end", pathrep_date)
+        return "COMPLETE"
+
+    # path report -> treatment MDT
+    wait_days = sample_empirical_ecdf(ctx.pdfs["pre_pathrep_to_treatmdt"], ctx.rng)
+    treatmdt_date = next_weekday(pathrep_date + timedelta(days=wait_days))
+
+    patient.data["wait_pathrep_to_treatmdt"] = wait_days
+    patient.data["treatmdt_date"] = treatmdt_date
+    patient.current_date = treatmdt_date
+    patient.add_event("Treatment_options_MDT_occured", treatmdt_date, wait_days=wait_days)
+
+    # treatment MDT -> outpatient
+    wait_days = sample_empirical_ecdf(ctx.pdfs["pre_treatmdt_to_outpat"], ctx.rng)
+    outpat_date = next_weekday(treatmdt_date + timedelta(days=wait_days))
+
+    patient.data["wait_treatmdt_to_outpat"] = wait_days
+    patient.data["outpat_date"] = outpat_date
+    patient.current_date = outpat_date
+    patient.add_event("Outpatient_appointment_occured", outpat_date, wait_days=wait_days)
+
     patient.is_complete = True
-    patient.add_event("pathway_end", patient.current_date)
+    patient.add_event("pathway_end", outpat_date)
     return "COMPLETE"
 
 

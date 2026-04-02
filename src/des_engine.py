@@ -28,11 +28,14 @@ class EngineConfig:
     seed: int = 1234
     wait_time_mode: Dict[str, str] | None = None
 
-    initial_biopsy_queue_n: int =  1 #add some inital backlog to the biopsy queue
+    initial_biopsy_queue_n: int =  1#add some inital backlog to the biopsy queue
     initial_biopsy_pending_n: int = 2
 
     #biopsy_capacity_dropout_prob_by_weekday: Dict[int, float] | None = None
-    biopsy_capacity_dropout_prob_by_weekday= {3: 0.2, 4:0.3} #Thursdays slot only happens 70% of time
+    biopsy_capacity_dropout_prob_by_weekday: Dict[int, float] =field(
+        default_factory=lambda : {3: 0.15, 4:0.2}
+    )
+   # biopsy_capacity_dropout_prob_by_weekday= {3: 0.15, 4:0.2} #Thursdays slot only happens 70% of time
 
    # biopsy_backlog_threshold: int | None = None
     #biopsy_capacity_if_backlogged_by_weekday: Dict[int, int] | None = None
@@ -42,11 +45,17 @@ class EngineConfig:
 
     # NEW: list of (threshold, capacity_map)
     #biopsy_backlog_capacity_tiers: List[Tuple[int, Dict[int, int]]] = field(default_factory=list)
+    biopsy_backlog_capacity_tiers: List[Tuple[int, Dict[int, int]]] = field(
+        default_factory= lambda: [
+            (5,  {3: 2, 4: 1}),  # if backlog >= 9
+            (10, {3: 2, 4: 2}),
+        ]
+    )
 
-    biopsy_backlog_capacity_tiers = [
-    (6,  {3: 2, 4: 1}),  # if backlog >= 9
-    (10, {3: 2, 4: 2}),  # if backlog >= 11
-]
+    #biopsy_backlog_capacity_tiers = [
+    #(5,  {3: 2, 4: 1}),  # if backlog >= 9
+    #(10, {3: 2, 4: 2}),  # if backlog >= 11
+#]
 
 
 

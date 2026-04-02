@@ -1,0 +1,4 @@
+scenario,patients_completed,mri_final_backlog,biopsy_final_backlog,mri_mean_queue_wait,biopsy_mean_queue_wait,biopsy_wait_n,biopsy_wait_mean,biopsy_wait_median,biopsy_wait_p90,pathway_n,pathway_mean,pathway_median,pathway_p90
+baseline_mc_mri,142,0,11,,3.433734939759036,83,30.40963855421687,26.0,44.8,142,71.93661971830986,74.5,111.9
+mri_des_only,148,1,6,4.1118421052631575,5.555555555555555,81,33.95061728395062,32.0,52.0,148,50.817567567567565,52.5,94.60000000000002
+full_frontend_des,152,5,5,3.1161290322580646,9.977777777777778,90,36.78888888888889,36.0,53.400000000000034,152,42.348684210526315,52.5,83.9
