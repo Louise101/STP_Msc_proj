@@ -49,7 +49,7 @@ def load_real_stage_waits() -> dict[str, pd.Series]:
 # --------------------------------------------------
 # Simulation helpers
 # --------------------------------------------------
-def run_all_mc_baseline(n_days: int = 365, lam_per_workday: float = 2.0, seed: int = 1234):
+def run_all_mc_baseline(n_days: int = 365, lam_per_workday: float = 0.586, seed: int = 1234):
     cfg = build_scenario_config(
         name="ALL_MC_BASELINE",
         start_date=date(2026, 1, 5),
@@ -207,7 +207,7 @@ def main():
 
     real_waits = load_real_stage_waits()
 
-    result = run_all_mc_baseline(n_days=365, lam_per_workday=2.0, seed=1234)
+    result = run_all_mc_baseline(n_days=365, lam_per_workday=0.586, seed=1234)
     sim_events_df = patient_results_to_event_df(result["patient_results"])
     sim_waits = derive_sim_stage_waits(sim_events_df)
 

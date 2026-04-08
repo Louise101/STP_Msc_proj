@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import date
-from statistics import mean
 from typing import Dict, List, Any
 
 import numpy as np
@@ -19,9 +18,7 @@ def patient_results_to_dataframe(patient_results) -> pd.DataFrame:
     rows = []
 
     for events, total_days in patient_results:
-        row = {
-            "total_days": total_days,
-        }
+        row = {"total_days": total_days}
 
         event_dates = {}
         event_outcomes = {}
@@ -85,9 +82,6 @@ def print_summary_table(summary_rows: List[Dict[str, Any]]) -> None:
 
 
 def extract_stage_waits(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Derive observed stage waits from event dates where possible.
-    """
     out = df.copy()
 
     if {"date_referral_recieved", "date_mri_performed"}.issubset(out.columns):
@@ -108,35 +102,11 @@ def extract_stage_waits(df: pd.DataFrame) -> pd.DataFrame:
             pd.to_datetime(out["date_mri_report_ready"])
         ).dt.days
 
-    if {"date_MDT_occured", "date_biopsy_done"}.issubset(out.columns):
-        out["obs_biopmdt_to_biopsy"] = (
-            pd.to_datetime(out["date_biopsy_done"]) -
-            pd.to_datetime(out["date_MDT_occured"])
-        ).dt.days
-
-    if {"date_biopsy_done", "date_Path_report_recieved"}.issubset(out.columns):
-        out["obs_biopsy_to_pathrep"] = (
-            pd.to_datetime(out["date_Path_report_recieved"]) -
-            pd.to_datetime(out["date_biopsy_done"])
-        ).dt.days
-
-    if {"date_Path_report_recieved", "date_Treatment_options_MDT_occured"}.issubset(out.columns):
-        out["obs_pathrep_to_treatmdt"] = (
-            pd.to_datetime(out["date_Treatment_options_MDT_occured"]) -
-            pd.to_datetime(out["date_Path_report_recieved"])
-        ).dt.days
-
-    if {"date_Treatment_options_MDT_occured", "date_Outpatient_appointment_occured"}.issubset(out.columns):
-        out["obs_treatmdt_to_outpat"] = (
-            pd.to_datetime(out["date_Outpatient_appointment_occured"]) -
-            pd.to_datetime(out["date_Treatment_options_MDT_occured"])
-        ).dt.days
-
     return out
 
 
 # =========================================================
-# Validation checks
+# Validation helpers
 # =========================================================
 
 def run_scenario(name: str, start_date: date, n_days: int, lam_per_workday: float, seed: int = 1234):
@@ -150,8 +120,38 @@ def run_scenario(name: str, start_date: date, n_days: int, lam_per_workday: floa
     return run_day_loop_with_stage_engine(cfg)
 
 
+# =========================================================
+# Validation checks
+# =========================================================
+
+def validate_main_scenarios() -> None:
+    print("\n=== ALL_MC vs PROSTAD comparison ===")
+
+    scenario_names = [
+        "ALL_MC_BASELINE",
+        "PROSTAD",
+    ]
+
+    summaries = []
+    for name in scenario_names:
+        result = run_scenario(
+            name=name,
+            start_date=date(2026, 1, 5),
+            n_days=365,
+            lam_per_workday=0.586,
+            seed=123,
+        )
+        summaries.append(summarise_results(name, result))
+
+    print_summary_table(summaries)
+
+    print("\nInterpretation guide:")
+    print("- PROSTAD should reduce pathway time compared with ALL_MC baseline if improved rules/capacity are represented")
+    print("- ALL_MC represents the empirical historical baseline")
+
+
 def validate_fixed_rule_scenario() -> None:
-    print("\n=== Fixed-rule validation ===")
+    print("\n=== PROSTAD fixed-rule validation ===")
 
     result = run_scenario(
         name="PROSTAD",
@@ -177,100 +177,8 @@ def validate_fixed_rule_scenario() -> None:
     print("- report_to_biopmdt should be 0 days")
 
 
-def validate_capacity_effect() -> None:
-    print("\n=== DES capacity effect validation ===")
-
-    low_cap = build_scenario_config(
-        name="HYBRID_BASELINE",
-        start_date=date(2026, 1, 5),
-        n_days=365,
-        lam_per_workday=0.586,
-    )
-    low_cap.seed = 123
-    low_cap.mri_capacity_by_weekday = {0: 0, 1: 1, 2: 0, 3: 0, 4: 0}
-
-    high_cap = build_scenario_config(
-        name="HYBRID_BASELINE",
-        start_date=date(2026, 1, 5),
-        n_days=365,
-        lam_per_workday=0.586,
-    )
-    high_cap.seed = 123
-    high_cap.mri_capacity_by_weekday = {0: 0, 1: 6, 2: 0, 3: 0, 4: 0}
-
-    res_low = run_day_loop_with_stage_engine(low_cap)
-    res_high = run_day_loop_with_stage_engine(high_cap)
-
-    s_low = summarise_results("HYBRID_LOW_MRI_CAP", res_low)
-    s_high = summarise_results("HYBRID_HIGH_MRI_CAP", res_high)
-
-    print_summary_table([s_low, s_high])
-
-    print("\nExpected behaviour:")
-    print("- Low MRI capacity should increase MRI DES waits")
-    print("- Low MRI capacity should usually increase total pathway time")
-    print("- Low MRI capacity may leave a larger final MRI queue")
-
-
-def validate_mc_vs_des() -> None:
-    print("\n=== MC vs DES comparison ===")
-
-    all_mc = run_scenario(
-        name="ALL_MC_BASELINE",
-        start_date=date(2026, 1, 5),
-        n_days=365,
-        lam_per_workday=0.586,
-        seed=123,
-    )
-
-    hybrid = run_scenario(
-        name="HYBRID_BASELINE",
-        start_date=date(2026, 1, 5),
-        n_days=365,
-        lam_per_workday=0.586,
-        seed=123,
-    )
-
-    print_summary_table([
-        summarise_results("ALL_MC_BASELINE", all_mc),
-        summarise_results("HYBRID_BASELINE", hybrid),
-    ])
-
-    print("\nExpected behaviour:")
-    print("- ALL_MC should have no DES queue pressure effect")
-    print("- HYBRID should show MRI/Biopsy DES waits if capacity is tight")
-
-
-def validate_main_scenarios() -> None:
-    print("\n=== Main scenario comparison ===")
-
-    scenario_names = [
-        "ALL_MC_BASELINE",
-        "HYBRID_BASELINE",
-        "PROSTAD",
-    ]
-
-    summaries = []
-    for name in scenario_names:
-        result = run_scenario(
-            name=name,
-            start_date=date(2026, 1, 5),
-            n_days=365,
-            lam_per_workday=0.586,
-            seed=123,
-        )
-        summaries.append(summarise_results(name, result))
-
-    print_summary_table(summaries)
-
-    print("\nInterpretation guide:")
-    print("- PROSTAD should usually reduce pathway time compared with HYBRID baseline")
-    print("- ALL_MC helps isolate the effect of ignoring capacity")
-    print("- HYBRID shows the effect of operational constraints")
-
-
 def validate_event_ordering() -> None:
-    print("\n=== Event ordering validation ===")
+    print("\n=== PROSTAD event ordering validation ===")
 
     result = run_scenario(
         name="PROSTAD",
@@ -296,12 +204,10 @@ def validate_event_ordering() -> None:
 # =========================================================
 
 def main():
-    print("Running pathway validation checks...")
+    print("Running simplified ALL_MC vs PROSTAD validation checks...")
 
     validate_main_scenarios()
     validate_fixed_rule_scenario()
-    validate_capacity_effect()
-    validate_mc_vs_des()
     validate_event_ordering()
 
     print("\nDone.")

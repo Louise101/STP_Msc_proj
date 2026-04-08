@@ -25,7 +25,7 @@ STAGE_CONFIG: Dict[str, Dict[str, Any]] = {
         "timing_type": "DES_OR_MC",
     },
     "mri_to_report": {
-        "resource": None,
+        "resource": "MRI_REPORT",
         "pdf_key": "pre_mri_to_mrireport",
         "completion_event": "mri_report_ready",
         "timing_type": "RULE",
@@ -33,7 +33,7 @@ STAGE_CONFIG: Dict[str, Dict[str, Any]] = {
 
     },
     "report_to_biopmdt": {
-        "resource": None,
+        "resource": "BIOPSY_MDT",
         "pdf_key": "pre_mrirep_to_biopsymdt",
         "completion_event": "MDT_occured",
         "timing_type": "RULE",
@@ -45,17 +45,17 @@ STAGE_CONFIG: Dict[str, Dict[str, Any]] = {
         "completion_event": "biopsy_done",
     },
     "biopsy_to_pathrep": {
-        "resource": None,
+        "resource": "PATHOLOGY",
         "pdf_key": "pre_biop_to_pathrep",
         "completion_event": "Path_report_recieved",
     },
     "pathrep_to_treatmdt": {
-        "resource": None,
+        "resource": "TREATMENT_MDT",
         "pdf_key": "pre_pathrep_to_treatmdt",
         "completion_event": "Treatment_options_MDT_occured",
     },
     "treatmdt_to_outpat": {
-        "resource": None,
+        "resource": "OUTPATIENT",
         "pdf_key": "pre_treatmdt_to_outpat",
         "completion_event": "Outpatient_appointment_occured",
     },

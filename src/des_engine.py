@@ -31,6 +31,13 @@ class EngineConfig:
     lam_per_workday: float
     mri_capacity_by_weekday: Dict[int, int]
     biopsy_capacity_by_weekday: Dict[int, int]
+
+    mri_report_capacity_by_weekday: Dict[int, int] | None = None
+    biopsy_mdt_capacity_by_weekday: Dict[int, int] | None = None
+    pathology_capacity_by_weekday: Dict[int, int] | None = None
+    treatment_mdt_capacity_by_weekday: Dict[int, int] | None = None
+    outpatient_capacity_by_weekday: Dict[int, int] | None = None
+
     biopsy_ready_delay_days: int = 0
     seed: int = 1234
     wait_time_mode: Dict[str, str] | None = None
@@ -71,6 +78,11 @@ def run_day_loop_with_stage_engine(
 
     mri_resource = QueueResource("MRI", cfg.mri_capacity_by_weekday)
     biopsy_resource = QueueResource("Biopsy", cfg.biopsy_capacity_by_weekday or {})
+    mri_report_resource = QueueResource("MRI_REPORT", cfg.mri_report_capacity_by_weekday or {})
+    biopsy_mdt_resource = QueueResource("BIOPSY_MDT", cfg.biopsy_mdt_capacity_by_weekday or {})
+    pathology_resource = QueueResource("PATHOLOGY", cfg.pathology_capacity_by_weekday or {})
+    treatment_mdt_resource = QueueResource("TREATMENT_MDT", cfg.treatment_mdt_capacity_by_weekday or {})
+    outpatient_resource = QueueResource("OUTPATIENT", cfg.outpatient_capacity_by_weekday or {})
 
     pending_mc = initialize_pending_mc()
 
@@ -83,6 +95,13 @@ def run_day_loop_with_stage_engine(
         resources={
             "MRI": mri_resource,
             "Biopsy": biopsy_resource,
+            "MRI_REPORT":mri_report_resource,
+            "BIOPSY_MDT":biopsy_mdt_resource,
+            "PATHOLOGY": pathology_resource,
+            "TREATMENT_MDT":treatment_mdt_resource, 
+            "OUTPATIENT":outpatient_resource 
+
+
         },
         stage_timing_policy = cfg.stage_timing_policy or {},
         fixed_wait_days_by_stage=cfg.fixed_wait_days_by_stage or {},
@@ -137,10 +156,22 @@ def run_day_loop_with_stage_engine(
         "capacity_by_resource": {
             "MRI": cfg.mri_capacity_by_weekday,
             "Biopsy": cfg.biopsy_capacity_by_weekday or {},
+            "MRI_REPORT":cfg.mri_report_capacity_by_weekday or {},
+            "BIOPSY_MDT":cfg.biopsy_mdt_capacity_by_weekday or {},
+            "PATHOLOGY": cfg.pathology_capacity_by_weekday or{},
+            "TREATMENT_MDT":cfg.treatment_mdt_capacity_by_weekday or {}, 
+            "OUTPATIENT":cfg.outpatient_capacity_by_weekday or {}
+
         },
         "final_queue_length_by_resource": {
             "MRI": mri_resource.queue_length(),
             "Biopsy": biopsy_resource.queue_length(),
+            "MRI_REPORT":mri_report_resource.queue_length(),
+            "BIOPSY_MDT":biopsy_mdt_resource.queue_length(),
+            "PATHOLOGY": pathology_resource.queue_length(),
+            "TREATMENT_MDT":treatment_mdt_resource.queue_length(), 
+            "OUTPATIENT":outpatient_resource.queue_length() 
+
         },
     }
 
@@ -158,6 +189,34 @@ def run_day_loop_with_stage_engine(
                 "daily_queue_len": biopsy_resource.daily_queue_len,
                 "daily_waits": biopsy_resource.daily_waits,
             },
+            "MRI_REPORT":{
+                "daily_started":mri_report_resource.daily_started,
+                "daily_queue_len": mri_report_resource.daily_queue_len,
+                "daily_waits":mri_report_resource.daily_waits,
+            },    
+            "BIOPSY_MDT":{
+                "daily_started":biopsy_mdt_resource.daily_started,
+                "daily_queue_len": biopsy_mdt_resource.daily_queue_len,
+                "daily_waits":biopsy_mdt_resource.daily_waits,
+            },
+            "PATHOLOGY":{
+                "daily_started":pathology_resource.daily_started,
+                "daily_queue_len": pathology_resource.daily_queue_len,
+                "daily_waits":pathology_resource.daily_waits,
+            },
+            
+            "TREATMENT_MDT":{
+                "daily_started":treatment_mdt_resource.daily_started,
+                "daily_queue_len": treatment_mdt_resource.daily_queue_len,
+                "daily_waits":treatment_mdt_resource.daily_waits,
+            },
+            "OUTPATIENT":{
+                "daily_started":outpatient_resource .daily_started,
+                "daily_queue_len": outpatient_resource .daily_queue_len,
+                "daily_waits":outpatient_resource .daily_waits,
+            },
+           
+
         },
         "summary_stats": summary_stats,
     }

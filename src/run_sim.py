@@ -8,7 +8,7 @@ from scenarios import build_scenario_config
 random.seed(10)
 
 cfg = build_scenario_config (
-    name = "ALL_MC_BASELINE",
+    name = "DES_PRE_PROSTAD",
     start_date=date(2024, 1, 1),
     n_days = 365,
     lam_per_workday= 0.586,
