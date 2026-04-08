@@ -94,19 +94,19 @@ def build_weekly_from_sim(sim_output: dict) -> pd.DataFrame:
 
 
 def build_weekly_queue_from_sim(sim_output: dict) -> pd.DataFrame:
-    daily_ref = pd.Series(sim_output["daily_referrals"]).sort_index()
+    daily_arrivals = pd.Series(sim_output["stage_activity"]["Biopsy"]["daily_arrivals"]).sort_index()
     daily_completed = pd.Series(sim_output["resources"]["Biopsy"]["daily_started"]).sort_index()
-    daily_queue = pd.Series(sim_output["resources"]["Biopsy"]["daily_queue_len"]).sort_index()
+    daily_backlog = pd.Series(sim_output["stage_activity"]["Biopsy"]["daily_backlog"]).sort_index()
 
-    daily_ref.index = pd.to_datetime(daily_ref.index)
+    daily_arrivals.index = pd.to_datetime(daily_arrivals.index)
     daily_completed.index = pd.to_datetime(daily_completed.index)
-    daily_queue.index = pd.to_datetime(daily_queue.index)
+    daily_backlog.index = pd.to_datetime(daily_backlog.index)
 
     weekly = pd.DataFrame({
-        "demand": daily_ref.resample("W-MON").sum(),
+        "demand": daily_arrivals.resample("W-MON").sum(),
         "completed": daily_completed.resample("W-MON").sum(),
-        "mean_queue": daily_queue.resample("W-MON").mean(),
-        "end_queue": daily_queue.resample("W-MON").last(),
+        "mean_backlog": daily_backlog.resample("W-MON").mean(),
+        "end_backlog": daily_backlog.resample("W-MON").last(),
     }).fillna(0)
 
     weekly = weekly.reset_index().rename(columns={"index": "week"})
@@ -180,7 +180,7 @@ print("\n=== Weekly simulation queue data ===")
 print(weekly_queue.head(20))
 
 plt.figure()
-plt.plot(weekly_queue["week"], weekly_queue["end_queue"])
+plt.plot(weekly_queue["week"], weekly_queue["end_backlog"])
 plt.xticks(rotation=45)
 plt.title("Simulated biopsy backlog (end of week)")
 plt.tight_layout()
@@ -211,7 +211,7 @@ print("KS p:", ks_p)
 # 6. Test 4: correlations
 # -----------------------------
 weekly_real["prev_waiting"] = weekly_real["waiting"].shift(1)
-weekly_queue["prev_waiting"] = weekly_queue["end_queue"].shift(1)
+weekly_queue["prev_waiting"] = weekly_queue["end_backlog"].shift(1)
 
 print("\n=== REAL correlations ===")
 print(weekly_real[["demand", "completed", "prev_waiting"]].corr())

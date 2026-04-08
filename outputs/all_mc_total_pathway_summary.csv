@@ -1,0 +1,4 @@
+pathway_subgroup,sim_n,sim_mean,sim_median,sim_std,sim_min,sim_max
+biopsy_pathology_only,41,75.21951219512195,74.0,15.865863032186352,40,113
+ended_before_biopsy,201,37.93532338308458,36.0,13.808721737362248,17,91
+full_pathway_to_outpatient,214,93.73831775700934,90.0,19.900851161922162,53,157

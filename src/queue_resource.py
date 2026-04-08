@@ -19,6 +19,15 @@ class QueueServiceEvent:
     wait_days: int
     start_date: date
 
+#define MC mode queue
+@dataclass
+class DelayQueueItem:
+    patient: Any
+    entry_date: date
+    ready_date: date
+    sampled_wait: int
+    stage_name: str
+
 
 @dataclass
 class QueueResource:

@@ -1,4 +1,4 @@
 scenario,delta_patients_completed,delta_mri_final_backlog,delta_biopsy_final_backlog,delta_biopsy_wait_mean,delta_pathway_mean
 baseline_mc_mri,0,0,0,0.0,0.0
-mri_des_only,6,1,-5,3.5409787297337516,-21.11905215074229
-full_frontend_des,10,5,-6,6.379250334672022,-29.58793550778354
+mri_des_only,12,4,-5,5.391350210970462,-15.339285714285715
+full_frontend_des,1,2,-10,7.755171349181847,-28.912867274569404

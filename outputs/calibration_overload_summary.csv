@@ -1,0 +1,3 @@
+biopsy_cap,dropout,score,mean_total_ref_to_pathrep,prop_met_62d_to_pathrep,mean_weekly_biopsy_ready,weekly_biopsy_capacity,mean_biopsy_overload_ratio,max_biopsy_overload_ratio,n_overloaded_weeks,prop_overloaded_weeks
+1,0.0,0.1260836583393605,76.68588903434856,0.15325801930095925,0.0,2.0,0.0,0.0,0.0,0.0
+2,0.0,0.1260836583393605,76.68588903434856,0.15325801930095925,0.0,4.0,0.0,0.0,0.0,0.0
