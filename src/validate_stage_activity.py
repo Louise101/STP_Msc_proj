@@ -175,3 +175,48 @@ plt.tight_layout()
 plt.show()
 
 plt.savefig("outputs/bottleneck_shift_delta_in_stage.png", dpi=300, bbox_inches="tight")
+
+# -----------------------------------------
+# Plot: daily in-stage occupancy over time
+# -----------------------------------------
+import matplotlib.pyplot as plt
+import pandas as pd
+
+def stage_activity_to_daily_df(result, stage_name: str) -> pd.DataFrame:
+    metrics = result["stage_activity"][stage_name]
+
+    all_dates = sorted(set(
+        list(metrics["daily_arrivals"].keys()) +
+        list(metrics["daily_in_stage"].keys()) +
+        list(metrics["daily_completed"].keys())
+    ))
+
+    rows = []
+    for d in all_dates:
+        rows.append({
+            "date": pd.to_datetime(d),
+            "daily_arrivals": metrics["daily_arrivals"].get(d, 0),
+            "daily_in_stage": metrics["daily_in_stage"].get(d, 0),
+            "daily_completed": metrics["daily_completed"].get(d, 0),
+        })
+
+    return pd.DataFrame(rows).sort_values("date")
+
+
+stage_name = "ref_to_mri"
+
+mc_stage_df = stage_activity_to_daily_df(mc_res, stage_name)
+prostad_stage_df = stage_activity_to_daily_df(prostad_res, stage_name)
+
+plt.figure(figsize=(12, 6))
+plt.plot(mc_stage_df["date"], mc_stage_df["daily_in_stage"], label="ALL_MC_BASELINE")
+plt.plot(prostad_stage_df["date"], prostad_stage_df["daily_in_stage"], label="PROSTAD")
+plt.ylabel("Patients in stage")
+plt.xlabel("Date")
+plt.title(f"Daily occupancy over time: {stage_name}")
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+plt.savefig("outputs/biopsy_stage_occupancy_over_time.png", dpi=300, bbox_inches="tight")
+

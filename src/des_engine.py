@@ -23,6 +23,7 @@ from stage_engine2 import (
     initialize_stage_activity,
     snapshot_stage_occupancy,
 )
+from event_log_utils import patient_results_to_event_log
 
 
 
@@ -115,6 +116,7 @@ def run_day_loop_with_stage_engine(
     )
 
     completed_patients = []
+    all_patients = []
     daily_referrals = {}
     next_pid = 1
     current_date = cfg.start_date
@@ -130,6 +132,7 @@ def run_day_loop_with_stage_engine(
 
         for _ in range(n_new):
             patient = create_new_patient(next_pid, current_date)
+            all_patients.append(patient)
             next_pid += 1
             enter_wait_stage(patient, "ref_to_mri", ctx)
 
@@ -158,6 +161,13 @@ def run_day_loop_with_stage_engine(
         total_days = (p.current_date - p.start_date).days
         patient_results.append((p.events, total_days))
 
+    all_patient_results = []
+    for p in all_patients:
+        total_days = (p.current_date - p.start_date).days
+        all_patient_results.append((p.events, total_days))
+
+    
+
     summary_stats = {
         "total_days": cfg.n_days,
         "total_patients_completed": len(patient_results),
@@ -184,8 +194,16 @@ def run_day_loop_with_stage_engine(
         },
     }
 
+    event_log_df = patient_results_to_event_log(
+        all_patient_results,
+        source_engine="STAGE_ENGINE",
+        start_date=cfg.start_date,
+    )
+
     return {
         "patient_results": patient_results,
+        "all_patient_results" : all_patient_results,
+        "event_log" : event_log_df,
         "daily_referrals": daily_referrals,
         "resources": {
             "MRI": {
@@ -229,5 +247,6 @@ def run_day_loop_with_stage_engine(
         },
         "stage_activity" : ctx.stage_activity,
         "summary_stats": summary_stats,
+        
     }
 

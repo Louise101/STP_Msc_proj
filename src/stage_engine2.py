@@ -439,7 +439,7 @@ def create_new_patient(patient_id: int, current_date: date) -> PatientState:
         current_date=current_date,
         current_stage="ref_to_mri",
     )
-    patient.add_event("referral_recieved", current_date)
+    patient.add_event("referral_received", current_date)
     return patient
 
 
@@ -472,3 +472,4 @@ def snapshot_stage_occupancy(current_date: date, ctx: StageContext) -> None:
             in_stage = 0
 
         ctx.stage_activity[stage_name]["daily_in_stage"][current_date] = in_stage
+

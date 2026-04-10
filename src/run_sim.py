@@ -3,12 +3,21 @@ from des_engine import EngineConfig, run_day_loop_with_stage_engine, WAIT_MODE_D
 from single_walk_mdt_day import trace_one_patient_mdtday
 from utils import extract_mdt_to_biopsy_waits, summarise_waits
 import random
+from pathlib import Path
 from scenarios import build_scenario_config
+from event_log_utils import save_event_log
+
 
 random.seed(10)
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = BASE_DIR / "data"
+OUTPUT_DIR = BASE_DIR / "outputs"
+OUTPUT_DIR.mkdir(exist_ok=True)
+
 cfg = build_scenario_config (
-    name = "DES_PRE_PROSTAD",
+    #name = "ALL_MC_BASELINE",
+    name = "PROSTAD",
     start_date=date(2024, 1, 1),
     n_days = 365,
     lam_per_workday= 0.586,
@@ -48,6 +57,11 @@ print("Biopsy starts:",
       sum(results["resources"]["Biopsy"]["daily_started"].values()))
 print("Any biopsy waits recorded:",
       any(len(v) > 0 for v in results["resources"]["Biopsy"]["daily_waits"].values()))
+
+save_event_log(
+    results["event_log"],
+    OUTPUT_DIR / "prostad_events.csv"
+)
 
 
 #mc_waits = extract_mdt_to_biopsy_waits(results["patient_results"])
