@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -93,6 +93,8 @@ class StageContext:
     stage_timing_policy: Dict[str, str] | None = None
     fixed_wait_days_by_stage: Dict[str, int] | None = None
     scenario_name: str | None = None
+
+    stage_activity: Dict[str, Dict[str, Dict[date, int]]] = field(default_factory=dict)
 
 
 # --------------------------------------------------
@@ -209,6 +211,16 @@ def process_all_mc_due_today_until_stable(
 
     return total_released
 
+def initialize_stage_activity() -> Dict[str, Dict[str, Dict[date, int]]]:
+    return {
+        stage_name: {
+            "daily_arrivals": {},
+            "daily_in_stage": {},
+            "daily_completed": {},
+        }
+        for stage_name in STAGE_CONFIG
+    }
+
 
 # --------------------------------------------------
 # Enter waiting stage
@@ -229,6 +241,11 @@ def enter_wait_stage(patient: PatientState, stage_name: str, ctx: StageContext) 
     stage_cfg = STAGE_CONFIG[stage_name]
 
     patient.current_stage = stage_name
+
+    entry_date = patient.current_date
+    ctx.stage_activity[stage_name]["daily_arrivals"][entry_date] = (
+        ctx.stage_activity[stage_name]["daily_arrivals"].get(entry_date, 0) + 1
+    )
 
     if mode == WAIT_MODE_MC:
         sampled_wait = get_non_des_wait_for_stage(stage_name, ctx)
@@ -282,6 +299,9 @@ def complete_wait_stage(
     whether via MC delay expiry or DES capacity release.
     """
     patient.current_date = completion_date
+    ctx.stage_activity[stage_name]["daily_completed"][completion_date] = (
+        ctx.stage_activity[stage_name]["daily_completed"].get(completion_date, 0) + 1
+)
 
     if stage_name == "ref_to_mri":
         patient.add_event("mri_performed", completion_date, wait_days=wait_days)
@@ -425,3 +445,30 @@ def create_new_patient(patient_id: int, current_date: date) -> PatientState:
 
 def initialize_pending_mc() -> Dict[str, Dict[date, List[DelayQueueItem]]]:
     return {stage_name: {} for stage_name in STAGE_CONFIG}
+
+def count_mc_in_stage(
+    pending_mc: Dict[str, Dict[date, List[DelayQueueItem]]],
+    stage_name: str,
+) -> int:
+    return sum(len(items) for items in pending_mc[stage_name].values())
+
+def snapshot_stage_occupancy(current_date: date, ctx: StageContext) -> None:
+    wait_time_mode = ctx.wait_time_mode or {}
+
+    for stage_name, cfg in STAGE_CONFIG.items():
+        mode = wait_time_mode.get(stage_name, WAIT_MODE_MC)
+
+        if mode == WAIT_MODE_MC:
+            in_stage = count_mc_in_stage(ctx.pending_mc, stage_name)
+
+        elif mode == WAIT_MODE_DES:
+            resource_name = cfg["resource"]
+            if resource_name is None:
+                in_stage = 0
+            else:
+                in_stage = ctx.resources[resource_name].queue_length()
+
+        else:
+            in_stage = 0
+
+        ctx.stage_activity[stage_name]["daily_in_stage"][current_date] = in_stage

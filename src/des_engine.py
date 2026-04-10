@@ -20,7 +20,10 @@ from stage_engine2 import (
     process_des_resource_for_day,
     process_all_mc_due_today_until_stable,
     create_new_patient,
+    initialize_stage_activity,
+    snapshot_stage_occupancy,
 )
+
 
 
 
@@ -45,6 +48,7 @@ class EngineConfig:
     fixed_wait_days_by_stage:Dict[str, str] | None = None
 
     scenario_name : str | None = None
+
 
     stage_timing_policy: Dict[str, str] | None = None
 
@@ -85,6 +89,7 @@ def run_day_loop_with_stage_engine(
     outpatient_resource = QueueResource("OUTPATIENT", cfg.outpatient_capacity_by_weekday or {})
 
     pending_mc = initialize_pending_mc()
+    stage_activity = initialize_stage_activity()
 
     ctx = StageContext(
         rng=rng,
@@ -106,6 +111,7 @@ def run_day_loop_with_stage_engine(
         stage_timing_policy = cfg.stage_timing_policy or {},
         fixed_wait_days_by_stage=cfg.fixed_wait_days_by_stage or {},
         scenario_name= None,
+        stage_activity=stage_activity,
     )
 
     completed_patients = []
@@ -140,6 +146,9 @@ def run_day_loop_with_stage_engine(
 
         # 3) Repeatedly process all MC work due today until stable
         process_all_mc_due_today_until_stable(current_date, ctx, completed_patients)
+
+        # 4) snapshot occupancy at end of day
+        snapshot_stage_occupancy(current_date, ctx)
 
         # 4) Advance day
         current_date += timedelta(days=1)
@@ -218,6 +227,7 @@ def run_day_loop_with_stage_engine(
            
 
         },
+        "stage_activity" : ctx.stage_activity,
         "summary_stats": summary_stats,
     }
 
