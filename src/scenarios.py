@@ -74,14 +74,14 @@ def build_scenario_config(name: str, start_date: date, n_days: int, lam_per_work
                 "mri_to_report": "FIXED",
                 "report_to_biopmdt": "FIXED",
                 "biopmdt_to_biopsy" : "EMPIRICAL",
-                "biopsy_to_pathrep": "FIXED",
+                "biopsy_to_pathrep": "EMPIRICAL",
                 "pathrep_to_treatmdt": "EMPIRICAL",
                 "treatmdt_to_outpat": "EMPIRICAL",
             },
             fixed_wait_days_by_stage={
                 "mri_to_report": 1,
                 "report_to_biopmdt": 0,
-                "biopsy_to_pathrep": 8
+                #"biopsy_to_pathrep": 8
             },
             scenario_name=name,
         )

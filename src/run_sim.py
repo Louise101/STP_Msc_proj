@@ -16,8 +16,8 @@ OUTPUT_DIR = BASE_DIR / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 cfg = build_scenario_config (
-    #name = "ALL_MC_BASELINE",
-    name = "PROSTAD",
+    name = "ALL_MC_BASELINE",
+    #name = "PROSTAD",
     start_date=date(2024, 1, 1),
     n_days = 365,
     lam_per_workday= 0.586,
@@ -60,7 +60,7 @@ print("Any biopsy waits recorded:",
 
 save_event_log(
     results["event_log"],
-    OUTPUT_DIR / "prostad_events.csv"
+    OUTPUT_DIR / "baseline_events.csv"
 )
 
 
