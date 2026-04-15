@@ -911,6 +911,101 @@ def aggregate_weekly_arrivals_across_seeds(weekly_arrivals_df: pd.DataFrame) -> 
         .reset_index()
     )
 
+#debug
+def debug_patient_inputs(result, patient_ids=(1, 2, 3, 4, 5)):
+    rows = []
+    for p in result.get("all_patients_objects", []):
+        if p.patient_id in patient_ids:
+            rows.append({
+                "patient_id": p.patient_id,
+                "wait_ref_to_mri": p.data.get("wait_ref_to_mri"),
+                "ref_to_mri_pre_delay": p.data.get("ref_to_mri_pre_delay"),
+                "ref_to_mri_queue_wait": p.data.get("ref_to_mri_queue_wait"),
+                "wait_biopmdt_to_biopsy": p.data.get("wait_biopmdt_to_biopsy"),
+                "biopmdt_outcome": p.data.get("biopmdt_outcome"),
+                "pathrep_outcome": p.data.get("pathrep_outcome"),
+            })
+    return pd.DataFrame(rows).sort_values("patient_id")
+
+def compare_referral_streams(mc_res, pros_res):
+    mc_daily = mc_res["daily_referrals"]
+    pros_daily = pros_res["daily_referrals"]
+
+    same_dates = set(mc_daily.keys()) == set(pros_daily.keys())
+    same_counts = all(mc_daily[d] == pros_daily[d] for d in mc_daily)
+
+    print("\n=== Referral stream comparison ===")
+    print("Same referral dates:", same_dates)
+    print("Same referral counts by day:", same_counts)
+    print("Total referrals MC:", sum(mc_daily.values()))
+    print("Total referrals PROSTAD:", sum(pros_daily.values()))
+
+def per_seed_flow_delta(flow_df: pd.DataFrame, event_name: str) -> pd.DataFrame:
+    sub = flow_df[flow_df["event"] == event_name].copy()
+    pivot = sub.pivot(index="seed", columns="scenario", values="count").reset_index()
+    pivot["delta"] = pivot["PROSTAD"] - pivot["ALL_MC_BASELINE"]
+    return pivot
+
+def debug_patients_with_downstream_progress(result, n=10):
+    rows = []
+
+    for p in result.get("all_patients_objects", []):
+        if (
+            p.data.get("biopmdt_outcome") is not None
+            or p.data.get("pathrep_outcome") is not None
+            or p.data.get("wait_biopmdt_to_biopsy") is not None
+            or any(
+                e.get("event") in {
+                    "biopsy_done",
+                    "Path_report_recieved",
+                    "Treatment_options_MDT_occured",
+                    "Outpatient_appointment_occured",
+                }
+                for e in getattr(p, "events", [])
+            )
+        ):
+            rows.append({
+                "patient_id": p.patient_id,
+                "wait_ref_to_mri": p.data.get("wait_ref_to_mri"),
+                "ref_to_mri_pre_delay": p.data.get("ref_to_mri_pre_delay"),
+                "ref_to_mri_queue_wait": p.data.get("ref_to_mri_queue_wait"),
+                "wait_biopmdt_to_biopsy": p.data.get("wait_biopmdt_to_biopsy"),
+                "biopmdt_outcome": p.data.get("biopmdt_outcome"),
+                "pathrep_outcome": p.data.get("pathrep_outcome"),
+                "n_events": len(getattr(p, "events", [])),
+            })
+
+    if not rows:
+        return pd.DataFrame(columns=[
+            "patient_id",
+            "wait_ref_to_mri",
+            "ref_to_mri_pre_delay",
+            "ref_to_mri_queue_wait",
+            "wait_biopmdt_to_biopsy",
+            "biopmdt_outcome",
+            "pathrep_outcome",
+            "n_events",
+        ])
+
+    df = pd.DataFrame(rows).sort_values("patient_id")
+    return df.head(n)
+
+def debug_patient_from_events(result, patient_id: int) -> pd.DataFrame:
+    for p in result.get("all_patients_objects", []):
+        if p.patient_id == patient_id:
+            rows = []
+            for e in p.events:
+                rows.append({
+                    "patient_id": p.patient_id,
+                    "event": e.get("event"),
+                    "date": e.get("date"),
+                    "wait_days": e.get("wait_days"),
+                    "outcome": e.get("outcome"),
+                })
+            return pd.DataFrame(rows)
+
+    return pd.DataFrame(columns=["patient_id", "event", "date", "wait_days", "outcome"])
+
 def main():
     all_stage_rows = []
     all_flow_rows = []
@@ -919,7 +1014,49 @@ def main():
     all_late_rows = []
     all_weekly_arrival_rows = []
 
+    # --------------------------------------------------
+    # ONE-SEED VALIDATION CHECK
+    # --------------------------------------------------
+    mc_check, pros_check = run_both_scenarios(seed=1)
+
+    compare_referral_streams(mc_check, pros_check)
+
+    mc_debug = debug_patient_inputs(mc_check)
+    pros_debug = debug_patient_inputs(pros_check)
+
+    print("\n=== Patient-level debug: MC ===")
+    print(mc_debug.to_string(index=False))
+
+    print("\n=== Patient-level debug: PROSTAD ===")
+    print(pros_debug.to_string(index=False))
+
     print(f"Running {len(SEEDS)} seeds: {SEEDS}")
+
+    print("\n=== Patients with downstream progress: MC ===")
+    print(debug_patients_with_downstream_progress(mc_check, n=10).to_string(index=False))
+
+    print("\n=== Patients with downstream progress: PROSTAD ===")
+    print(debug_patients_with_downstream_progress(pros_check, n=10).to_string(index=False))
+
+   # p = mc_check["all_patients_objects"][1]
+   # print("\n=== Example MC patient data ===")
+    #print(p.data)
+    #print("\n=== Example MC patient events ===")
+    #for e in p.events:
+     #   print(e)
+
+    #p = pros_check["all_patients_objects"][1]
+    #print("\n=== Example PROSTAD patient data ===")
+    #print(p.data)
+    #print("\n=== Example PROSTAD patient events ===")
+    #for e in p.events:
+     #   print(e)
+
+    print("\n=== Example MC patient events (patient 2) ===")
+    print(debug_patient_from_events(mc_check, patient_id=2).to_string(index=False))
+
+    print("\n=== Example PROSTAD patient events (patient 2) ===")
+    print(debug_patient_from_events(pros_check, patient_id=2).to_string(index=False))
 
     for seed in SEEDS:
         print(f"Running seed {seed}...")
@@ -972,6 +1109,17 @@ def main():
 
     weekly_arrivals_summary = aggregate_weekly_arrivals_across_seeds(weekly_arrivals_df)
     weekly_arrivals_summary.to_csv(OUTPUT_DIR / "weekly_stage_arrivals_summary.csv", index=False)
+
+    # --------------------------------------------------
+    # DELTA VARIABILITY CHECKS
+    # --------------------------------------------------
+    for event_name in ["biopsy_done", "Path_report_recieved", "Treatment_options_MDT_occured"]:
+        delta_df = per_seed_flow_delta(flow_df, event_name)
+
+        print(f"\n=== Per-seed delta summary: {event_name} ===")
+        print(delta_df["delta"].describe())
+
+        delta_df.to_csv(OUTPUT_DIR / f"per_seed_delta_{event_name}.csv", index=False)
 
     summary_cols = [
         "stage",

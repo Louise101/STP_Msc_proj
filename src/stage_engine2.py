@@ -5,10 +5,17 @@ from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+import hashlib
 
 from patient_state import PatientState
 from queue_resource import QueuePatient
 from sampling import sample_empirical_ecdf
+
+
+
+
+
+
 
 WAIT_MODE_MC = "MC"
 WAIT_MODE_DES = "DES"
@@ -60,7 +67,15 @@ STAGE_CONFIG: Dict[str, Dict[str, Any]] = {
         "completion_event": "Outpatient_appointment_occured",
     },
 }
-
+WAIT_STREAM_BY_STAGE = {
+    "ref_to_mri": "wait_ref_to_mri",
+    "mri_to_report": "wait_mri_to_report",
+    "report_to_biopmdt": "wait_report_to_biopmdt",
+    "biopmdt_to_biopsy": "wait_biopmdt_to_biopsy",
+    "biopsy_to_pathrep": "wait_biopsy_to_pathrep",
+    "pathrep_to_treatmdt": "wait_pathrep_to_treatmdt",
+    "treatmdt_to_outpat": "wait_treatmdt_to_outpat",
+}
 
 # --------------------------------------------------
 # MC delay queue item
@@ -89,6 +104,7 @@ class StageContext:
 
     # resource_name -> QueueResource
     resources: Dict[str, Any]
+    base_seed: int
 
     stage_timing_policy: Dict[str, str] | None = None
     fixed_wait_days_by_stage: Dict[str, int] | None = None
@@ -98,17 +114,20 @@ class StageContext:
         # resource_name -> arrival_date -> list[QueuePatient]
     pending_des_arrivals: Dict[str, Dict[date, List[QueuePatient]]] = field(default_factory=dict)
 
+    
+
 
 # --------------------------------------------------
 # Sampling helpers
 # --------------------------------------------------
-def sample_wait_for_stage(stage_name: str, ctx: StageContext) -> int:
- 
+def sample_wait_for_stage(stage_name: str, patient: PatientState, ctx: StageContext) -> int:
     pdf_key = STAGE_CONFIG[stage_name]["pdf_key"]
     pdf_obj = ctx.pdfs[pdf_key]
 
-    samples = sample_empirical_ecdf(pdf_obj, rng=ctx.rng)
+    stream_name = WAIT_STREAM_BY_STAGE[stage_name]
+    rng = make_patient_rng(ctx.base_seed, patient.patient_id, stream_name)
 
+    samples = sample_empirical_ecdf(pdf_obj, rng=rng)
     return int(samples)
 
 def get_non_des_wait_for_stage(stage_name: str, ctx: StageContext) -> int:
@@ -125,7 +144,7 @@ def get_non_des_wait_for_stage(stage_name: str, ctx: StageContext) -> int:
         return int(fixed_wait_days_by_stage[stage_name])
 
     if policy == "EMPIRICAL":
-        return sample_wait_for_stage(stage_name, ctx)
+        return sample_wait_for_stage(stage_name, patient, ctx)
 
     raise ValueError(f"Unknown timing policy '{policy}' for stage '{stage_name}'")
     # ---- EXAMPLE OPTIONS ----
@@ -149,26 +168,22 @@ def get_non_des_wait_for_stage(stage_name: str, ctx: StageContext) -> int:
 #        ) from e
 
 
-def sample_mdt_decision(ctx: StageContext) -> int:
-    """
-    Adapt the key below if your branching dict uses a different name.
-    Expects e.g. {0: 0.38, 1: 0.60, 2: 0.02}
-    """
+def sample_mdt_decision(patient: PatientState, ctx: StageContext) -> int:
     probs = ctx.branching["biopmdt_outcome"]
     keys = list(probs.keys())
     p = list(probs.values())
-    return int(ctx.rng.choice(keys, p=p))
+
+    rng = make_patient_rng(ctx.base_seed, patient.patient_id, "branch_mdt")
+    return int(rng.choice(keys, p=p))
 
 
-def sample_pathology_outcome(ctx: StageContext) -> int:
-    """
-    Adapt the key below if your branching dict uses a different name.
-    Expects e.g. {0: 0.18, 1: 0.82}
-    """
+def sample_pathology_outcome(patient: PatientState, ctx: StageContext) -> int:
     probs = ctx.branching["pathrep_outcome"]
     keys = list(probs.keys())
     p = list(probs.values())
-    return int(ctx.rng.choice(keys, p=p))
+
+    rng = make_patient_rng(ctx.base_seed, patient.patient_id, "branch_pathology")
+    return int(rng.choice(keys, p=p))
 
 def release_due_des_arrivals_for_day(current_date: date, ctx: StageContext) -> None:
     """
@@ -245,13 +260,30 @@ def initialize_pending_des_arrivals() -> Dict[str, Dict[date, List[QueuePatient]
 
 
 
-def sample_ref_to_mri_pre_delay(ctx: StageContext) -> int:
+def sample_ref_to_mri_pre_delay(patient: PatientState, ctx: StageContext) -> int:
+    rng = make_patient_rng(ctx.base_seed, patient.patient_id, "pre_delay_ref_to_mri")
+    return int(sample_empirical_ecdf(ctx.pdfs["pre_referral_to_mri_pre_delay"], rng))
+
+# RNG stream helpers 
+
+
+
+def make_stable_int_seed(*parts: object) -> int:
     """
-    Sample non-capacity pre-queue delay for referral -> MRI.
-    This should come from the lower-quantile empirical distribution
-    built in PDF_create.py.
+    Build a deterministic 64-bit seed from arbitrary hashable parts.
     """
-    return int(sample_empirical_ecdf(ctx.pdfs["pre_referral_to_mri_pre_delay"], ctx.rng))
+    s = "|".join(str(p) for p in parts)
+    digest = hashlib.sha256(s.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], byteorder="big", signed=False)
+
+
+def make_patient_rng(base_seed: int, patient_id: int, stream_name: str) -> np.random.Generator:
+    """
+    Deterministic per-patient, per-stream RNG.
+    Same patient_id + stream_name + base_seed => same RNG stream.
+    """
+    seed = make_stable_int_seed(base_seed, patient_id, stream_name)
+    return np.random.default_rng(seed)
 # --------------------------------------------------
 # Enter waiting stage
 # --------------------------------------------------
@@ -262,7 +294,7 @@ def get_stage_wait_days(stage_name: str, ctx: StageContext) -> int:
         return int(ctx.fixed_wait_days_by_stage[stage_name])
 
     # default behaviour = empirical MC
-    return sample_wait_for_stage(stage_name, ctx)
+    return sample_wait_for_stage(stage_name, patient, ctx)
 
 def get_rule_based_wait(stage_name: str, patient: PatientState) -> int:
     """
@@ -289,7 +321,7 @@ def enter_wait_stage(patient, stage_name: str, ctx: StageContext) -> None:
 
     # Only apply the hybrid pre-delay to ref->MRI when using DES
     if stage_name == "ref_to_mri" and mode == WAIT_MODE_DES:
-        pre_delay = sample_ref_to_mri_pre_delay(ctx)
+        pre_delay = sample_ref_to_mri_pre_delay(patient, ctx)
         entry_date = entry_date + timedelta(days=pre_delay)
 
         patient.data["ref_to_mri_pre_delay"] = pre_delay
@@ -301,7 +333,7 @@ def enter_wait_stage(patient, stage_name: str, ctx: StageContext) -> None:
         if timing_type == "RULE":
             sampled_wait = get_rule_based_wait(stage_name, patient)
         else:
-            sampled_wait = sample_wait_for_stage(stage_name, ctx)
+            sampled_wait = sample_wait_for_stage(stage_name, patient, ctx)
 
         ready_date = entry_date + timedelta(days=sampled_wait)
 
@@ -363,7 +395,7 @@ def complete_wait_stage(
     if stage_name == "report_to_biopmdt":
         patient.add_event("MDT_occured", completion_date, wait_days=wait_days)
 
-        mdt_outcome = sample_mdt_decision(ctx)
+        mdt_outcome = sample_mdt_decision(patient, ctx)
         patient.add_event("mdt_decision", completion_date, outcome=mdt_outcome)
 
         if mdt_outcome == 1:
@@ -380,7 +412,7 @@ def complete_wait_stage(
     if stage_name == "biopsy_to_pathrep":
         patient.add_event("Path_report_recieved", completion_date, wait_days=wait_days)
 
-        path_outcome = sample_pathology_outcome(ctx)
+        path_outcome = sample_pathology_outcome(patient, ctx)
         patient.add_event("Path_report_outcome", completion_date, outcome=path_outcome)
 
         if path_outcome == 1:

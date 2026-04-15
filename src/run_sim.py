@@ -66,6 +66,8 @@ save_event_log(
 
 
 
+
+
 #mc_waits = extract_mdt_to_biopsy_waits(results["patient_results"])
 #print(summarise_waits(mc_waits, label="MC upstream + DES biopsy").to_string(index=False))
 

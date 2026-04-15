@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from typing import Optional, Any, Dict, List, Tuple
 
 import numpy as np
+import pandas as pd
 
 from patient_state import PatientState
 from queue_resource import QueuePatient, QueueResource
@@ -73,6 +74,7 @@ class EngineConfig:
 
 
 
+
 def run_day_loop_with_stage_engine(
     cfg: EngineConfig,
     *,
@@ -102,6 +104,7 @@ def run_day_loop_with_stage_engine(
         branching=branching,
         wait_time_mode=wait_time_mode,
         pending_mc=pending_mc,
+        base_seed=cfg.seed,
         resources={
             "MRI": mri_resource,
             "Biopsy": biopsy_resource,
@@ -213,25 +216,27 @@ def run_day_loop_with_stage_engine(
         start_date=cfg.start_date,
     )
 
-    print("\nDebug check: first 10 completed patients with MRI wait components")
-    shown = 0
-    for p in completed_patients:
-        if "wait_ref_to_mri" in p.data:
-            print(
-                p.patient_id,
-                p.data.get("ref_to_mri_pre_delay"),
-                p.data.get("ref_to_mri_queue_wait"),
-                p.data.get("wait_ref_to_mri"),
-            )
-            shown += 1
-            if shown >= 10:
-                break   
+   # print("\nDebug check: first 10 completed patients with MRI wait components")
+   # shown = 0
+    #for p in completed_patients:
+     #   if "wait_ref_to_mri" in p.data:
+      #      print(
+       #         p.patient_id,
+        #        p.data.get("ref_to_mri_pre_delay"),
+         #       p.data.get("ref_to_mri_queue_wait"),
+          #      p.data.get("wait_ref_to_mri"),
+           # )
+            #shown += 1
+            #if shown >= 10:
+             #   break   
 
     return {
         "patient_results": patient_results,
         "all_patient_results" : all_patient_results,
         "event_log" : event_log_df,
         "daily_referrals": daily_referrals,
+        "completed_patients_objects": completed_patients,
+        "all_patients_objects": all_patients,
         "resources": {
             "MRI": {
                 "daily_started": mri_resource.daily_started,
