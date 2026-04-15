@@ -16,6 +16,8 @@ from stage_engine2 import (
     WAIT_MODE_DES,
     STAGE_CONFIG,
     initialize_pending_mc,
+    initialize_pending_des_arrivals,
+    release_due_des_arrivals_for_day,
     enter_wait_stage,
     process_des_resource_for_day,
     process_all_mc_due_today_until_stable,
@@ -35,6 +37,7 @@ class EngineConfig:
     lam_per_workday: float
     mri_capacity_by_weekday: Dict[int, int]
     biopsy_capacity_by_weekday: Dict[int, int]
+    daily_referrals_override: Dict[date, int] | None = None
 
     mri_report_capacity_by_weekday: Dict[int, int] | None = None
     biopsy_mdt_capacity_by_weekday: Dict[int, int] | None = None
@@ -90,6 +93,7 @@ def run_day_loop_with_stage_engine(
     outpatient_resource = QueueResource("OUTPATIENT", cfg.outpatient_capacity_by_weekday or {})
 
     pending_mc = initialize_pending_mc()
+    pending_des_arrivals = initialize_pending_des_arrivals()
     stage_activity = initialize_stage_activity()
 
     ctx = StageContext(
@@ -109,6 +113,7 @@ def run_day_loop_with_stage_engine(
 
 
         },
+        pending_des_arrivals=pending_des_arrivals,
         stage_timing_policy = cfg.stage_timing_policy or {},
         fixed_wait_days_by_stage=cfg.fixed_wait_days_by_stage or {},
         scenario_name= None,
@@ -123,11 +128,15 @@ def run_day_loop_with_stage_engine(
 
     for _ in range(cfg.n_days):
         # 1) Add new referrals first
-        n_new = sample_poisson_weekday_only(
-            lam_per_workday=cfg.lam_per_workday,
-            weekday=current_date.weekday(),
-            rng=rng,
-        )
+        if cfg.daily_referrals_override is not None:
+            n_new = int(cfg.daily_referrals_override.get(current_date, 0))
+        else:
+            n_new = sample_poisson_weekday_only(
+                lam_per_workday=cfg.lam_per_workday,
+                weekday=current_date.weekday(),
+                rng=rng,
+            )
+
         daily_referrals[current_date] = n_new
 
         for _ in range(n_new):
@@ -136,7 +145,11 @@ def run_day_loop_with_stage_engine(
             next_pid += 1
             enter_wait_stage(patient, "ref_to_mri", ctx)
 
-        # 2) Process DES resources for today
+        # 2) Release DES arrivals scheduled for today into their queues
+        release_due_des_arrivals_for_day(current_date, ctx)
+
+        # 3) Process DES resources for today
+        
         des_resources_to_process = set()
         for stage_name, stage_cfg in STAGE_CONFIG.items():
             if wait_time_mode.get(stage_name, WAIT_MODE_MC) == WAIT_MODE_DES:
@@ -199,6 +212,20 @@ def run_day_loop_with_stage_engine(
         source_engine="STAGE_ENGINE",
         start_date=cfg.start_date,
     )
+
+    print("\nDebug check: first 10 completed patients with MRI wait components")
+    shown = 0
+    for p in completed_patients:
+        if "wait_ref_to_mri" in p.data:
+            print(
+                p.patient_id,
+                p.data.get("ref_to_mri_pre_delay"),
+                p.data.get("ref_to_mri_queue_wait"),
+                p.data.get("wait_ref_to_mri"),
+            )
+            shown += 1
+            if shown >= 10:
+                break   
 
     return {
         "patient_results": patient_results,

@@ -1,0 +1,11 @@
+scenario,event,count_in_last_window_mean,count_in_last_window_std
+ALL_MC_BASELINE,Outpatient_appointment_occured,6.25,2.0487480130686233
+ALL_MC_BASELINE,Path_report_recieved,6.7,2.5152168474057426
+ALL_MC_BASELINE,Treatment_options_MDT_occured,6.15,2.058998223459779
+ALL_MC_BASELINE,biopsy_done,7.05,3.3791154245795716
+ALL_MC_BASELINE,mri_performed,12.75,3.5224841712692063
+PROSTAD,Outpatient_appointment_occured,6.95,3.4101242453055947
+PROSTAD,Path_report_recieved,7.7,3.0279400675428794
+PROSTAD,Treatment_options_MDT_occured,5.9,3.110254685797662
+PROSTAD,biopsy_done,7.15,2.9607075967890197
+PROSTAD,mri_performed,11.45,2.9995613714429377

@@ -1,0 +1,10 @@
+event,ALL_MC_BASELINE,PROSTAD,difference
+MDT_occured,136,127,-9
+Outpatient_appointment_occured,57,57,0
+Path_report_outcome,69,75,6
+Path_report_recieved,69,75,6
+Treatment_options_MDT_occured,58,58,0
+biopsy_done,72,77,5
+mri_performed,136,127,-9
+mri_report_ready,136,127,-9
+referral_received,147,133,-14

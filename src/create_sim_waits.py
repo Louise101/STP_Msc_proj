@@ -4,8 +4,11 @@ import pandas as pd
 BASE_DIR = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = BASE_DIR / "outputs"
 
-EVENTS_FILE = OUTPUT_DIR / "baseline_events.csv"
-SIM_WAITS_OUT = OUTPUT_DIR / "base_sim_waits.csv"
+#EVENTS_FILE = OUTPUT_DIR / "baseline_events.csv"
+#SIM_WAITS_OUT = OUTPUT_DIR / "base_sim_waits.csv"
+
+EVENTS_FILE = OUTPUT_DIR / "prostad_events.csv"
+SIM_WAITS_OUT = OUTPUT_DIR / "pros_sim_waits.csv"
 
 
 # --------------------------------------------------

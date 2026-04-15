@@ -95,6 +95,8 @@ class StageContext:
     scenario_name: str | None = None
 
     stage_activity: Dict[str, Dict[str, Dict[date, int]]] = field(default_factory=dict)
+        # resource_name -> arrival_date -> list[QueuePatient]
+    pending_des_arrivals: Dict[str, Dict[date, List[QueuePatient]]] = field(default_factory=dict)
 
 
 # --------------------------------------------------
@@ -168,6 +170,15 @@ def sample_pathology_outcome(ctx: StageContext) -> int:
     p = list(probs.values())
     return int(ctx.rng.choice(keys, p=p))
 
+def release_due_des_arrivals_for_day(current_date: date, ctx: StageContext) -> None:
+    """
+    Move DES patients whose scheduled entry date is today into the actual DES queue.
+    """
+    for resource_name, arrivals_by_date in ctx.pending_des_arrivals.items():
+        due = arrivals_by_date.pop(current_date, [])
+        for qp in due:
+            ctx.resources[resource_name].add_patient(qp)
+
 def process_all_mc_due_today_until_stable(
     current_date: date,
     ctx: StageContext,
@@ -221,7 +232,26 @@ def initialize_stage_activity() -> Dict[str, Dict[str, Dict[date, int]]]:
         for stage_name in STAGE_CONFIG
     }
 
+def initialize_pending_des_arrivals() -> Dict[str, Dict[date, List[QueuePatient]]]:
+    return {
+        "MRI": {},
+        "Biopsy": {},
+        "MRI_REPORT": {},
+        "BIOPSY_MDT": {},
+        "PATHOLOGY": {},
+        "TREATMENT_MDT": {},
+        "OUTPATIENT": {},
+    }
 
+
+
+def sample_ref_to_mri_pre_delay(ctx: StageContext) -> int:
+    """
+    Sample non-capacity pre-queue delay for referral -> MRI.
+    This should come from the lower-quantile empirical distribution
+    built in PDF_create.py.
+    """
+    return int(sample_empirical_ecdf(ctx.pdfs["pre_referral_to_mri_pre_delay"], ctx.rng))
 # --------------------------------------------------
 # Enter waiting stage
 # --------------------------------------------------
@@ -234,55 +264,75 @@ def get_stage_wait_days(stage_name: str, ctx: StageContext) -> int:
     # default behaviour = empirical MC
     return sample_wait_for_stage(stage_name, ctx)
 
+def get_rule_based_wait(stage_name: str, patient: PatientState) -> int:
+    """
+    Deterministic/rule-based waits for PROSTAD stages.
+    """
+    if stage_name == "mri_to_report":
+        return 1
 
-def enter_wait_stage(patient: PatientState, stage_name: str, ctx: StageContext) -> None:
-    wait_time_mode = ctx.wait_time_mode or {}
-    mode = wait_time_mode.get(stage_name, WAIT_MODE_MC)
-    stage_cfg = STAGE_CONFIG[stage_name]
+    if stage_name == "report_to_biopmdt":
+        return 0
+
+    raise ValueError(f"No rule-based wait defined for stage '{stage_name}'")
+
+def enter_wait_stage(patient, stage_name: str, ctx: StageContext) -> None:
+    mode = ctx.wait_time_mode.get(stage_name, WAIT_MODE_MC)
+    cfg = STAGE_CONFIG[stage_name]
 
     patient.current_stage = stage_name
-
     entry_date = patient.current_date
+        # Record stage arrival on the date the patient enters this stage logic
     ctx.stage_activity[stage_name]["daily_arrivals"][entry_date] = (
         ctx.stage_activity[stage_name]["daily_arrivals"].get(entry_date, 0) + 1
     )
 
+    # Only apply the hybrid pre-delay to ref->MRI when using DES
+    if stage_name == "ref_to_mri" and mode == WAIT_MODE_DES:
+        pre_delay = sample_ref_to_mri_pre_delay(ctx)
+        entry_date = entry_date + timedelta(days=pre_delay)
+
+        patient.data["ref_to_mri_pre_delay"] = pre_delay
+        patient.data["ref_to_mri_queue_entry_date"] = entry_date
+
     if mode == WAIT_MODE_MC:
-        sampled_wait = get_non_des_wait_for_stage(stage_name, ctx)
-        ready_date = patient.current_date + timedelta(days=sampled_wait)
+        timing_type = cfg.get("timing_type", "MC")
+
+        if timing_type == "RULE":
+            sampled_wait = get_rule_based_wait(stage_name, patient)
+        else:
+            sampled_wait = sample_wait_for_stage(stage_name, ctx)
+
+        ready_date = entry_date + timedelta(days=sampled_wait)
 
         item = DelayQueueItem(
             patient=patient,
-            entry_date=patient.current_date,
+            entry_date=entry_date,
             ready_date=ready_date,
             sampled_wait=sampled_wait,
             stage_name=stage_name,
         )
         ctx.pending_mc[stage_name].setdefault(ready_date, []).append(item)
-        return
 
-    if mode == WAIT_MODE_DES:
-        resource_name = stage_cfg["resource"]
-        if not resource_name:
-            raise ValueError(
-                f"Stage '{stage_name}' is set to DES but has no resource defined."
-            )
+    elif mode == WAIT_MODE_DES:
+        resource_name = cfg["resource"]
+        if resource_name is None:
+            raise ValueError(f"Stage {stage_name} is DES but has no resource")
 
-        ctx.resources[resource_name].add_patient(
-            QueuePatient(
-                patient_id=patient.patient_id,
-                referral_date=patient.current_date,
-                payload={
-                    "patient": patient,
-                    "stage_name": stage_name,
-                    "entry_date": patient.current_date,
-                },
-            )
+        qp = QueuePatient(
+            patient_id=patient.patient_id,
+            referral_date=entry_date,
+            payload={
+                "patient": patient,
+                "stage_name": stage_name,
+                "entry_date": entry_date,
+            },
         )
-        return
 
-    raise ValueError(f"Unknown wait mode '{mode}' for stage '{stage_name}'.")
+        ctx.pending_des_arrivals[resource_name].setdefault(entry_date, []).append(qp)
 
+    else:
+        raise ValueError(f"Unknown wait mode for stage {stage_name}: {mode}")
 
 # --------------------------------------------------
 # Route after a waiting stage completes
@@ -294,16 +344,13 @@ def complete_wait_stage(
     wait_days: int,
     ctx: StageContext,
 ) -> None:
-    """
-    Called when a patient leaves a waiting stage,
-    whether via MC delay expiry or DES capacity release.
-    """
     patient.current_date = completion_date
     ctx.stage_activity[stage_name]["daily_completed"][completion_date] = (
         ctx.stage_activity[stage_name]["daily_completed"].get(completion_date, 0) + 1
-)
+    )
 
     if stage_name == "ref_to_mri":
+        patient.data["wait_ref_to_mri"] = wait_days
         patient.add_event("mri_performed", completion_date, wait_days=wait_days)
         enter_wait_stage(patient, "mri_to_report", ctx)
         return
@@ -319,10 +366,6 @@ def complete_wait_stage(
         mdt_outcome = sample_mdt_decision(ctx)
         patient.add_event("mdt_decision", completion_date, outcome=mdt_outcome)
 
-        # Assumption:
-        # 1 = biopsy
-        # 0 = discharged / surveillance / no biopsy pathway end
-        # 2 = other non-biopsy end
         if mdt_outcome == 1:
             enter_wait_stage(patient, "biopmdt_to_biopsy", ctx)
         else:
@@ -340,9 +383,6 @@ def complete_wait_stage(
         path_outcome = sample_pathology_outcome(ctx)
         patient.add_event("Path_report_outcome", completion_date, outcome=path_outcome)
 
-        # Assumption:
-        # 1 = cancer -> treatment MDT
-        # 0 = no cancer -> pathway ends
         if path_outcome == 1:
             enter_wait_stage(patient, "pathrep_to_treatmdt", ctx)
         else:
@@ -368,8 +408,6 @@ def complete_wait_stage(
         return
 
     raise ValueError(f"Unknown stage_name '{stage_name}' in complete_wait_stage().")
-
-
 # --------------------------------------------------
 # Daily processing helpers
 # --------------------------------------------------
@@ -415,16 +453,35 @@ def process_des_resource_for_day(
     resource = ctx.resources[resource_name]
     started_today = resource.process_day(current_date)
 
+def process_des_resource_for_day(
+    resource_name: str,
+    current_date: date,
+    ctx: StageContext,
+    completed_patients: List[PatientState],
+) -> None:
+    resource = ctx.resources[resource_name]
+    started_today = resource.process_day(current_date)
+
     for service_event in started_today:
         queue_patient = service_event.patient
         patient = queue_patient.payload["patient"]
         stage_name = queue_patient.payload["stage_name"]
 
+        queue_wait_days = int(service_event.wait_days)
+        total_wait_days = queue_wait_days
+
+        if stage_name == "ref_to_mri":
+            pre_delay = int(patient.data.get("ref_to_mri_pre_delay", 0))
+            total_wait_days = pre_delay + queue_wait_days
+
+            patient.data["ref_to_mri_queue_wait"] = queue_wait_days
+            patient.data["wait_ref_to_mri"] = total_wait_days
+
         complete_wait_stage(
             patient=patient,
             stage_name=stage_name,
             completion_date=current_date,
-            wait_days=int(service_event.wait_days),
+            wait_days=total_wait_days,
             ctx=ctx,
         )
 

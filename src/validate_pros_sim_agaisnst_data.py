@@ -45,9 +45,11 @@ def load_real_stage_waits() -> dict[str, pd.Series]:
         df[end_col] = pd.to_datetime(df[end_col], format="%m/%d/%y", errors="coerce")
 
         df = df.dropna(subset=[start_col, end_col]).copy()
-        waits = (df[end_col] - df[start_col]).dt.days
 
-        out[stage_name] = waits.dropna().astype(int)
+        waits = (df[end_col] - df[start_col]).dt.days
+        waits = waits[waits >= 0].dropna().astype(int)
+
+        out[stage_name] = waits
 
         print(
             f"{stage_name}: n={len(out[stage_name])}, "
@@ -266,6 +268,8 @@ def main():
     print("\nSaved:")
     print(OUTPUT_DIR / "pros_stage_wait_validation.csv")
     print(OUTPUT_DIR / "pros_total_pathway_summary.csv")
+
+    
 
 
 

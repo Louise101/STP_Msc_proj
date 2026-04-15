@@ -109,7 +109,14 @@ def extract_stage_waits(df: pd.DataFrame) -> pd.DataFrame:
 # Validation helpers
 # =========================================================
 
-def run_scenario(name: str, start_date: date, n_days: int, lam_per_workday: float, seed: int = 1234):
+def run_scenario(
+    name,
+    start_date,
+    n_days,
+    lam_per_workday,
+    seed,
+    daily_referrals_override=None,
+):
     cfg = build_scenario_config(
         name=name,
         start_date=start_date,
@@ -117,6 +124,7 @@ def run_scenario(name: str, start_date: date, n_days: int, lam_per_workday: floa
         lam_per_workday=lam_per_workday,
     )
     cfg.seed = seed
+    cfg.daily_referrals_override = daily_referrals_override
     return run_day_loop_with_stage_engine(cfg)
 
 

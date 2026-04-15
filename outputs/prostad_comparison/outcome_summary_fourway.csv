@@ -1,0 +1,11 @@
+dataset,outcome_col,outcome,n,prop
+pre_real,pathrep_outcome,,85,0.5629139072847682
+pre_real,pathrep_outcome,1.0,54,0.3576158940397351
+pre_real,pathrep_outcome,0.0,12,0.07947019867549669
+post_real,biopmdt_outcome,1.0,88,0.5751633986928104
+post_real,biopmdt_outcome,0.0,54,0.35294117647058826
+post_real,biopmdt_outcome,,9,0.058823529411764705
+post_real,biopmdt_outcome,2.0,2,0.013071895424836602
+post_real,pathrep_outcome,,86,0.5620915032679739
+post_real,pathrep_outcome,1.0,57,0.37254901960784315
+post_real,pathrep_outcome,0.0,10,0.06535947712418301

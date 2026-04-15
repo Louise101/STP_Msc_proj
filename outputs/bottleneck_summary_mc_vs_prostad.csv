@@ -1,0 +1,8 @@
+stage,mc_total_arrivals,prostad_total_arrivals,arrival_change,arrival_pct_change,mc_mean_in_stage,prostad_mean_in_stage,in_stage_change,in_stage_pct_change,mc_completion_ratio,prostad_completion_ratio,completion_change,completion_pct_change,stage_flag
+biopmdt_to_biopsy,82,83,1,1.22,5.649,6.121,0.471,8.341,0.878,0.928,0.05,5.656,🟠 PRESSURE ↑
+biopsy_to_pathrep,72,77,5,6.944,1.655,2.0,0.345,20.861,0.958,0.974,0.016,1.637,🟠 PRESSURE ↑
+mri_to_report,136,127,-9,-6.618,0.373,0.348,-0.025,-6.618,1.0,1.0,0.0,0.0,⚡ FAST TRACK
+pathrep_to_treatmdt,58,59,1,1.724,1.868,1.921,0.052,2.786,1.0,0.983,-0.017,-1.695,⚪ STABLE
+ref_to_mri,147,133,-14,-9.524,9.962,1.296,-8.666,-86.991,0.925,0.955,0.03,3.212,🟢 IMPROVED
+report_to_biopmdt,136,127,-9,-6.618,0.0,0.0,0.0,,1.0,1.0,0.0,0.0,⚡ FAST TRACK
+treatmdt_to_outpat,58,58,0,0.0,1.879,1.932,0.052,2.77,0.983,0.983,0.0,0.0,⚪ STABLE
