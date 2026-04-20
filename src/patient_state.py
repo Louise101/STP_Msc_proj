@@ -12,6 +12,8 @@ class PatientState:
     current_date: date
     current_stage: str
 
+    pathway_type: str | None = None
+
     events: List[Dict[str, Any]] = field(default_factory=list)
     data: Dict[str, Any] = field(default_factory=dict)
 
