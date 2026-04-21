@@ -7,8 +7,8 @@ from stage_engine2 import WAIT_MODE_MC, WAIT_MODE_DES
 
 def build_combined_config(name: str, start_date: date, n_days: int, seed: int = 1234) -> CombinedEngineConfig:
     # replace with values derived from your combined real data
-    lam_per_workday = 1.10
-    p_prostad = 0.48
+    lam_per_workday = 1.7528735632183907
+    p_prostad = 0.5098039215686274
 
     return CombinedEngineConfig(
         start_date=start_date,

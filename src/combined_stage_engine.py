@@ -179,7 +179,7 @@ def enter_wait_stage(patient: PatientState, stage_name: str, ctx: StageContext) 
     # Only PROSTAD MRI DES uses pre-delay
     if stage_name == "ref_to_mri" and mode == WAIT_MODE_DES:
         pre_delay = sample_ref_to_mri_pre_delay(patient, ctx)
-        entry_date = entry_date + timedelta(days=pre_delay)
+        entry_date = entry_date #+ timedelta(days=pre_delay)
 
         patient.data["ref_to_mri_pre_delay"] = pre_delay
         patient.data["ref_to_mri_queue_entry_date"] = entry_date

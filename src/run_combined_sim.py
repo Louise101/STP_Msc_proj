@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 import pandas as pd
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 from combined_des_engine import CombinedEngineConfig, run_day_loop_combined_engine
 
@@ -155,6 +156,8 @@ def main():
     n_biopsy = (sim_df["event"] == "biopsy_done").sum()
 
     print("Biopsy rate from MDT:", n_biopsy / n_mdt)
+
+
 
 
 if __name__ == "__main__":
