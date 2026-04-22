@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from typing import Any
 
 from engine.pathway_definitions import FULL_PATHWAY_END_EVENT, STAGE_EVENT_PAIRS
 
@@ -19,11 +20,7 @@ MILESTONE_EVENTS = [
 ]
 
 
-def safe_pct_change(new: float, old: float) -> float:
-    """Return percentage change or NaN when the denominator is missing/zero."""
-    if old in (0, 0.0, None) or pd.isna(old):
-        return np.nan
-    return (new - old) / old * 100.0
+
 
 
 def flatten_wait_values(daily_waits: dict) -> list[float]:
@@ -158,6 +155,43 @@ def summarise_flow_counts(result: dict, scenario_name: str, seed: int) -> pd.Dat
     ]
     return pd.DataFrame(rows)
 
+def summarise_flow_counts_across_seeds(flow_df: pd.DataFrame) -> pd.DataFrame:
+    return (
+        flow_df.groupby(["scenario", "event"])
+        .agg(
+            mean_count=("count", "mean"),
+            std_count=("count", "std"),
+        )
+        .reset_index()
+    )
+
+
+def summarise_mri_resource(result: dict[str, Any], scenario_name: str, seed: int) -> pd.DataFrame:
+    """Summarise queue pressure for the MRI_PROSTAD resource only."""
+    rows: list[dict[str, Any]] = []
+
+    for resource_name, metrics in result.get("resources", {}).items():
+        if resource_name != "MRI_PROSTAD":
+            continue
+
+        queue_vals = list((metrics.get("daily_queue_len", {}) or {}).values())
+        wait_vals = flatten_wait_values(metrics.get("daily_waits", {}) or {})
+
+        rows.append(
+            {
+                "scenario": scenario_name,
+                "seed": seed,
+                "resource": resource_name,
+                "mean_queue_len": float(np.mean(queue_vals)) if queue_vals else 0.0,
+                "peak_queue_len": max(queue_vals) if queue_vals else 0,
+                "mean_wait": float(np.mean(wait_vals)) if wait_vals else 0.0,
+                "peak_wait": max(wait_vals) if wait_vals else 0,
+                "n_wait_observations": len(wait_vals),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
 
 def summarise_resource_pressure(result: dict, scenario_name: str, seed: int) -> pd.DataFrame:
     """Summarise queue and wait behaviour for each resource."""
@@ -224,3 +258,42 @@ def summarise_pathway_lengths(pathway_df: pd.DataFrame) -> pd.DataFrame:
         )
         .reset_index()
     )
+
+def summarise_pathway_stats(pathway_df: pd.DataFrame) -> pd.DataFrame:
+    """Summarise full-pathway durations by scenario."""
+    if pathway_df.empty:
+        return pd.DataFrame(columns=["scenario", "n", "mean_days", "median_days", "p90_days", "pct_within_62"])
+    return (
+        pathway_df.groupby("scenario")["total_days"]
+        .agg(
+            n=("count"),
+            mean_days=("mean"),
+            median_days=("median"),
+            std_days=("std"),
+            min_days=("min"),
+            max_days=("max"),
+            p25=(lambda x: np.percentile(x, 25)),
+            p75=(lambda x: np.percentile(x, 75)),
+            p90_days=(lambda x: np.percentile(x, 90)),
+            pct_within_62=(lambda x: (x <= 62).mean() * 100),
+        )
+        .reset_index()
+    )
+
+def summarise_mixed_pathway_type(pathway_df: pd.DataFrame) -> pd.DataFrame:
+    """Within OBS_MIX, compare full-pathway durations by patient pathway type."""
+    if pathway_df.empty:
+        return pd.DataFrame(columns=["pathway_type", "n", "mean_days", "median_days", "p90", "pct_within_62"])
+    return (
+        pathway_df.groupby("pathway_type")["total_days"]
+        .agg(
+            n=("count"),
+            mean_days=("mean"),
+            median_days=("median"),
+            p75=(lambda x: np.percentile(x, 75)),
+            p90=(lambda x: np.percentile(x, 90)),
+            pct_within_62=(lambda x: (x <= 62).mean() * 100),
+        )
+        .reset_index()
+    )
+

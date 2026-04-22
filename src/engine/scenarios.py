@@ -153,3 +153,5 @@ def generate_daily_referrals(
         referrals[current_date] = int(rng.poisson(lam_per_workday)) if current_date.weekday() < 5 else 0
         current_date += timedelta(days=1)
     return referrals
+
+

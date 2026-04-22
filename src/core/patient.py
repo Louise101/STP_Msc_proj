@@ -40,3 +40,9 @@ class PatientState:
     """Return True if this patient has already recorded the given event."""
     def has_event(self, event_name: str) -> bool:
         return any(event.get("event") == event_name for event in self.events)
+    
+    
+    """Total elapsed days from pathway start to the patient's current date."""
+   # @property
+    def total_days_in_system(self) -> int:
+        return (self.current_date - self.start_date).days

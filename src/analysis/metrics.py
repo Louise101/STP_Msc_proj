@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from typing import Any
 
 from core.event_log import EVENT_TO_STAGE
-from engine.pathway_definitions import STAGE_EVENT_PAIRS
+from engine.pathway_definitions import STAGE_EVENT_PAIRS,FULL_PATHWAY_END_EVENT
 
 
 MILESTONE_EVENTS = [
@@ -38,79 +39,40 @@ def safe_pct_change(new: float, old: float) -> float:
         return np.nan
     return (new - old) / old * 100
 
+def extract_stage_waits(result: dict, scenario_name: str, seed: int) -> pd.DataFrame:
+    rows = []
 
-def extract_stage_waits(result: dict, scenario_name: str, seed: int | None = None) -> pd.DataFrame:
-    """Extract observed stage waits from a simulation result.
+    stage_pairs = [
+        ("referral_received", "mri_performed", "ref_to_mri"),
+        ("mri_performed", "mri_report_ready", "mri_to_report"),
+        ("mri_report_ready", "MDT_occured", "report_to_biopmdt"),
+        ("MDT_occured", "biopsy_done", "biopmdt_to_biopsy"),
+        ("biopsy_done", "Path_report_recieved", "biopsy_to_pathrep"),
+        ("Path_report_recieved", "Treatment_options_MDT_occured", "pathrep_to_treatmdt"),
+        ("Treatment_options_MDT_occured", "Outpatient_appointment_occured", "treatmdt_to_outpat"),
+    ]
 
-    Stage waits are reconstructed from sequential events in each patient's event
-    log rather than trusting stage-specific helper columns.
-    """
-    rows: list[dict] = []
-    for events, _ in result["patient_results"]:
-        if not events:
-            continue
-        sorted_events = sorted(events, key=lambda item: item["date"])
-        for first, second in zip(sorted_events[:-1], sorted_events[1:]):
-            stage_name = STAGE_EVENT_PAIRS.get((first["event"], second["event"]))
-            if stage_name is None:
-                continue
-            rows.append(
-                {
-                    "scenario": scenario_name,
-                    "seed": seed,
-                    "patient_id": first.get("patient_id"),
-                    "stage": stage_name,
-                    "wait_days": (second["date"] - first["date"]).days,
-                }
-            )
+    for patient in result["all_patients_objects"]:
+        event_dates = {}
+        for event in patient.events:
+            event_dates[event["event"]] = event["date"]
+
+        for start_event, end_event, stage_name in stage_pairs:
+            if start_event in event_dates and end_event in event_dates:
+                rows.append(
+                    {
+                        "scenario": scenario_name,
+                        "seed": seed,
+                        "patient_id": patient.patient_id,
+                        "stage": stage_name,
+                        "wait_days": (event_dates[end_event] - event_dates[start_event]).days,
+                    }
+                )
+
     return pd.DataFrame(rows)
 
 
-def summarise_stage_waits(stage_wait_df: pd.DataFrame) -> pd.DataFrame:
-    """Summarise a long-format stage wait table."""
-    if stage_wait_df.empty:
-        return pd.DataFrame(columns=["scenario", "stage", "n", "mean_wait", "median_wait", "p90_wait"])
-    return (
-        stage_wait_df.groupby(["scenario", "stage"])
-        .agg(
-            n=("wait_days", "count"),
-            mean_wait=("wait_days", "mean"),
-            median_wait=("wait_days", "median"),
-            p90_wait=("wait_days", lambda x: np.percentile(x, 90)),
-        )
-        .reset_index()
-    )
 
-
-def summarise_stage_activity(result: dict, scenario_name: str, seed: int) -> pd.DataFrame:
-    """Summarise stage arrivals, occupancy, and completions for one run."""
-    rows: list[dict] = []
-    for stage_name, metrics in result.get("stage_activity", {}).items():
-        arrivals = metrics.get("daily_arrivals", {}) or {}
-        in_stage = metrics.get("daily_in_stage", {}) or {}
-        completed = metrics.get("daily_completed", {}) or {}
-
-        arrivals_vals = list(arrivals.values())
-        in_stage_vals = list(in_stage.values())
-        completed_vals = list(completed.values())
-        total_arrivals = int(sum(arrivals_vals))
-        total_completed = int(sum(completed_vals))
-
-        rows.append(
-            {
-                "scenario": scenario_name,
-                "seed": seed,
-                "stage": stage_name,
-                "total_arrivals": total_arrivals,
-                "mean_daily_arrivals": float(np.mean(arrivals_vals)) if arrivals_vals else 0.0,
-                "peak_daily_arrivals": max(arrivals_vals) if arrivals_vals else 0,
-                "mean_in_stage": float(np.mean(in_stage_vals)) if in_stage_vals else 0.0,
-                "peak_in_stage": max(in_stage_vals) if in_stage_vals else 0,
-                "total_completed": total_completed,
-                "completion_ratio": (total_completed / total_arrivals) if total_arrivals > 0 else np.nan,
-            }
-        )
-    return pd.DataFrame(rows)
 
 
 def summarise_flow_counts(result: dict, scenario_name: str, seed: int) -> pd.DataFrame:
@@ -136,6 +98,24 @@ def extract_full_pathway_lengths(result: dict, scenario_name: str, seed: int | N
                 "patient_id": patient.patient_id,
                 "pathway_type": patient.data.get("pathway_type"),
                 "total_days": patient.total_days_in_system(),
+            }
+        )
+    return pd.DataFrame(rows)
+
+def extract_pathway_lengths(result: dict[str, Any], scenario_name: str, seed: int | None = None) -> pd.DataFrame:
+    """Keep only patients who completed the full pathway to outpatient."""
+    rows: list[dict[str, Any]] = []
+    for patient in result.get("completed_patients_objects", []):
+        event_names = {event["event"] for event in patient.events}
+        if FULL_PATHWAY_END_EVENT not in event_names:
+            continue
+        rows.append(
+            {
+                "scenario": scenario_name,
+                "seed": seed,
+                "patient_id": patient.patient_id,
+                "pathway_type": patient.data.get("pathway_type"),
+                "total_days": (patient.current_date - patient.start_date).days,
             }
         )
     return pd.DataFrame(rows)

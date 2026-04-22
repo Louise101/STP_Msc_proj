@@ -22,6 +22,83 @@ STAGE_FILE_SPECS: dict[str, tuple[str, str, str]] = {
 }
 
 
+REAL_STAGE_SPECS = {
+    "pre": {
+        "ref_to_mri": ("pre_ref_to_mri.csv", "Date of referral to pathway", "Date of MRI", "uk"),
+        "mri_to_report": ("pre_mri_to_mrirep.csv", "Date of MRI", "Date MRI reported", "uk"),
+        "report_to_biopmdt": ("pre_mrirep_to_biopmdt.csv", "Date MRI reported", "Date of Prostate MRI MDT", "uk"),
+        "biopmdt_to_biopsy": ("pre_biopmdt_to_biop.csv", "Date of Prostate MRI MDT", "Date of Biopsy", "uk"),
+        "biopsy_to_pathrep": ("pre_biop_to_pathrep.csv", "Date of Biopsy", "Date of pathology report", "uk"),
+        "pathrep_to_treatmdt": ("pre_pathrep_to_treatmdt.csv", "Date of pathology report", "Date of MDT (treatment options)", "uk"),
+        "treatmdt_to_outpat": ("pre_treatmdt_to_outpat.csv", "Date of MDT (treatment options)", "Date of outpat appt", "uk"),
+    },
+    "pros": {
+        "ref_to_mri": ("pros_ref_to_mri.csv", "Date of referral to pathway", "Date of MRI", "us"),
+        "mri_to_report": ("pros_mri_to_mriclin.csv", "Date of MRI", "Date of clinic", "us"),
+        "biopmdt_to_biopsy": ("pros_mriclin_to_biop.csv", "Date of clinic", "Date of biopsy", "us"),
+        "biopsy_to_pathrep": ("pros_biop_to_pathrep.csv", "Date of biopsy", "Date of pathology report", "us"),
+        "pathrep_to_treatmdt": ("pros_pathrep_to_treatmdt.csv", "Date of pathology report", "Date of MDT to discuss treatment options", "us"),
+        "treatmdt_to_outpat": ("pros_treatmdt_to_outpat.csv", "Date of MDT to discuss treatment options", "Date of OPD appt", "us"),
+    },
+}
+
+STAGE_LABELS = {
+    "ref_to_mri": "Referral â MRI",
+    "mri_to_report": "MRI â Report",
+    "report_to_biopmdt": "Report â Biopsy MDT",
+    "biopmdt_to_biopsy": "Biopsy MDT â Biopsy",
+    "biopsy_to_pathrep": "Biopsy â Path Report",
+    "pathrep_to_treatmdt": "Path Report â Treat MDT",
+    "treatmdt_to_outpat": "Treat MDT â Outpatient",
+}
+
+
+def parse_date_series(series: pd.Series, style: str) -> pd.Series:
+    """Parse real-world date columns that use mixed UK and US formats."""
+    if style == "uk":
+        return pd.to_datetime(series, dayfirst=True, errors="coerce")
+    if style == "us":
+        return pd.to_datetime(series, format="%m/%d/%y", errors="coerce")
+    return pd.to_datetime(series, errors="coerce")
+
+
+
+#def load_real_stage_data(dataset: str, data_dir: Path) -> dict[str, pd.Series]:
+ #   """Load real observed wait distributions for each stage."""
+  #  specs = REAL_STAGE_SPECS[dataset]
+    # outputs: dict[str, pd.Series] = {}
+
+    # for stage, (filename, start_col, end_col, style) in specs.items():
+    #     df = pd.read_csv(data_dir / filename)
+    #     start_dates = parse_date_series(df[start_col], style)
+    #     end_dates = parse_date_series(df[end_col], style)
+    #     waits = (end_dates - start_dates).dt.days
+    #     outputs[stage] = waits[(waits.notna()) & (waits >= 0)]
+
+    # return outputs
+
+def load_real_stage_waits(data_dir: Path) -> pd.DataFrame:
+    rows = []
+
+    for real_scenario, specs in REAL_STAGE_SPECS.items():
+        for stage, (fname, col1, col2, style) in specs.items():
+            df = pd.read_csv(data_dir / fname).copy()
+            d1 = parse_date_series(df[col1], style)
+            d2 = parse_date_series(df[col2], style)
+            waits = (d2 - d1).dt.days
+            waits = waits[(waits.notna()) & (waits >= 0)]
+
+            for w in waits:
+                rows.append({
+                    "scenario": real_scenario,
+                    "stage": stage,
+                    "wait_days": float(w),
+                })
+
+    return pd.DataFrame(rows)
+
+
+
 def load_dates(path: Path, date_cols: list[str]) -> pd.DataFrame:
     """
     Load a CSV and parse the supplied date columns.
