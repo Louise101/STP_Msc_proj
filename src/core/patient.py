@@ -43,6 +43,6 @@ class PatientState:
     
     
     """Total elapsed days from pathway start to the patient's current date."""
-   # @property
+    #@property
     def total_days_in_system(self) -> int:
         return (self.current_date - self.start_date).days
