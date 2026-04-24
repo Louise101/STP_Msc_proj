@@ -1,0 +1,13 @@
+comparison,pathway_type,real_dataset,level,stage,n_sim,n_real,mean_sim,mean_real,median_sim,median_real,p90_sim,p90_real,mean_diff,median_diff,ks_stat,ks_pvalue
+OBS_MIX BASELINE cumulative vs pre,BASELINE,pre,cumulative,time_to_mri,171,,24.36842105263158,25.28,23.0,,36.0,,-0.9115789473684224,,,
+OBS_MIX BASELINE cumulative vs pre,BASELINE,pre,cumulative,time_to_mri_reporting,171,,31.146198830409357,32.68666666666667,29.0,,45.0,,-1.54046783625731,,,
+OBS_MIX BASELINE cumulative vs pre,BASELINE,pre,cumulative,time_to_biopsy_decision,171,,36.239766081871345,37.40136054421769,34.0,,50.0,,-1.1615944623463434,,,
+OBS_MIX BASELINE cumulative vs pre,BASELINE,pre,cumulative,time_to_biopsy,103,,63.349514563106794,66.4927536231884,58.0,,88.6,,-3.143239060081612,,,
+OBS_MIX BASELINE cumulative vs pre,BASELINE,pre,cumulative,time_to_diagnosis,103,,72.57281553398059,74.765625,68.0,,97.8,,-2.192809466019412,,,
+OBS_MIX BASELINE cumulative vs pre,BASELINE,pre,cumulative,time_to_outpatient_diagnosis,84,,93.5,94.26530612244898,91.0,,120.10000000000001,,-0.7653061224489761,,,
+OBS_MIX PROSTAD cumulative vs pros,PROSTAD,pros,cumulative,time_to_mri,191,,25.12565445026178,13.125,20.0,,46.0,,12.00065445026178,,,
+OBS_MIX PROSTAD cumulative vs pros,PROSTAD,pros,cumulative,time_to_mri_reporting,191,,26.12565445026178,14.013698630136986,21.0,,47.0,,12.111955820124795,,,
+OBS_MIX PROSTAD cumulative vs pros,PROSTAD,pros,cumulative,time_to_biopsy_decision,191,,26.12565445026178,,21.0,,47.0,,,,,
+OBS_MIX PROSTAD cumulative vs pros,PROSTAD,pros,cumulative,time_to_biopsy,106,,53.39622641509434,47.791666666666664,50.0,,72.5,,5.6045597484276755,,,
+OBS_MIX PROSTAD cumulative vs pros,PROSTAD,pros,cumulative,time_to_diagnosis,106,,62.283018867924525,58.098591549295776,59.0,,87.0,,4.1844273186287495,,,
+OBS_MIX PROSTAD cumulative vs pros,PROSTAD,pros,cumulative,time_to_outpatient_diagnosis,93,,81.36559139784946,73.4,78.0,,109.0,,7.965591397849451,,,

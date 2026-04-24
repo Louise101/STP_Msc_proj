@@ -1,0 +1,9 @@
+metric,value
+mean_per_week,3.1020408163265305
+median_per_week,3.0
+min_per_week,1.0
+max_per_week,5.0
+weeks_lt_4,29.0
+weeks_eq_4,18.0
+weeks_gt_4,2.0
+n_weeks,49.0

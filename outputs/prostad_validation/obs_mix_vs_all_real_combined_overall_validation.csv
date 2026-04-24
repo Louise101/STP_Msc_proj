@@ -1,0 +1,2 @@
+comparison,level,stage,n_sim,n_real,mean_sim,mean_real,median_sim,median_real,p90_sim,p90_real,mean_diff,median_diff,ks_stat,ks_pvalue
+OBS_MIX vs ALL_REAL_COMBINED,full_pathway,full_pathway,177,99,87.12429378531074,83.72727272727273,84.0,77.0,114.4,117.2,3.397021058038007,7.0,0.18883752782057867,0.018252993923756896
