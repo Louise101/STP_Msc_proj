@@ -1,0 +1,2 @@
+level,stage,label,n_sim,n_real,mean_sim,mean_real,median_sim,median_real,p90_sim,p90_real,mean_diff,median_diff,ks_stat,ks_pvalue
+full_pathway,full_pathway,Full pathway,52,49,92.8076923076923,94.26530612244898,94.5,92.0,115.8,118.2,-1.4576138147566695,2.5,0.1043956043956044,0.9100602849388908

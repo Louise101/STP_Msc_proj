@@ -24,7 +24,7 @@ STAGE_CONFIG: dict[str, dict[str, Any]] = {
         "completion_event": "MDT_occured",
     },
     "biopmdt_to_biopsy": {
-        "resource": None,
+        "resource": "BIOPSY",
         "pdf_key": "pre_biopmdt_to_biop",
         "completion_event": "biopsy_done",
     },

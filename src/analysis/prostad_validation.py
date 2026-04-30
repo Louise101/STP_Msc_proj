@@ -2,65 +2,72 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+from typing import Iterable
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.stats import ks_2samp
+from scipy.stats import ks_2samp, ttest_ind
 
 from engine.combined_engine import run_day_loop_combined_engine
 from engine.scenarios import build_combined_config, generate_daily_referrals
-from analysis.metrics import extract_full_pathway_lengths, extract_stage_waits
-from data_prep.empirical_inputs import REAL_STAGE_SPECS
+from analysis.validation import build_real_pathway_csvs, load_real_pathway_data
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
-OUTPUT_DIR = BASE_DIR / "outputs" / "prostad_validation"
+OUTPUT_DIR = BASE_DIR / "outputs" / "prostad_validation_ecdf_mri3"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-PATHWAY_FILES = {
-    "pre": ("pre_pathway.csv", "uk"),
-    "pros": ("pros_pathway.csv", "generic"),
-}
+START_DATE = date(2026, 1, 5)
+N_DAYS = 365
+LAM_PER_WORKDAY = 1.1010830324909748
 
-PROSTAD_REPORT_OVERALL = {
-    "PROSTAD_mean_time_to_mri": 13.0,
-    "PROSTAD_mean_time_to_mri_reporting": 14.0,
-    "PROSTAD_mean_time_to_biopsy_decision": 14.0,
-    "PROSTAD_mean_time_to_biopsy": 46.0,
-    "PROSTAD_mean_time_to_diagnosis": 53.0,
-    "PROSTAD_mean_time_to_outpatient_diagnosis": 70.0,
-    "USUAL_mean_time_to_mri": 25.0,
-    "USUAL_mean_time_to_mri_reporting": 33.0,
-    "USUAL_mean_time_to_biopsy_decision": 38.0,
-    "USUAL_mean_time_to_biopsy": 66.0,
-    "USUAL_mean_time_to_diagnosis": 76.0,
-    "USUAL_mean_time_to_outpatient_diagnosis": 98.0,
-}
+SEEDS = range(1000, 1030)
 
-CUMULATIVE_METRIC_LABELS = {
-    "time_to_mri": "Time to MRI",
-    "time_to_mri_reporting": "Time to MRI reporting",
-    "time_to_biopsy_decision": "Time to biopsy decision",
-    "time_to_biopsy": "Time to biopsy",
-    "time_to_diagnosis": "Time to diagnosis",
-    "time_to_outpatient_diagnosis": "Time to outpatient diagnosis",
-}
+FULL_PATHWAY_EVENT = "Outpatient_appointment_occured"
+
+STAGE_ORDER = [
+    "ref_to_mri",
+    "mri_to_report",
+    "report_to_biopmdt",
+    "biopmdt_to_biopsy",
+    "biopsy_to_pathrep",
+    "pathrep_to_treatmdt",
+    "treatmdt_to_outpat",
+]
 
 STAGE_LABELS = {
     "ref_to_mri": "Referral → MRI",
-    "mri_to_report": "MRI → Report",
-    "report_to_biopmdt": "Report → Biopsy MDT",
-    "mri_to_decision_combined": "MRI → clinic/decision (combined)",
-    "biopmdt_to_biopsy": "Biopsy MDT/clinic → Biopsy",
+    "mri_to_report": "MRI → MRI Report",
+    "report_to_biopmdt": "MRI clinic → Biopsy Decision",
+    "biopmdt_to_biopsy": "Biopsy Decision → Biopsy",
     "biopsy_to_pathrep": "Biopsy → Pathology",
     "pathrep_to_treatmdt": "Pathology → Treatment MDT",
     "treatmdt_to_outpat": "Treatment MDT → Outpatient",
 }
 
+STAGE_ENDPOINT_EVENTS = {
+    "ref_to_mri": "mri_performed",
+    "mri_to_report": "mri_report_ready",
+    "report_to_biopmdt": "MDT_occured",
+    "biopmdt_to_biopsy": "biopsy_done",
+    "biopsy_to_pathrep": "Path_report_recieved",
+    "pathrep_to_treatmdt": "Treatment_options_MDT_occured",
+    "treatmdt_to_outpat": "Outpatient_appointment_occured",
+}
 
-def parse_date_series(series: pd.Series, style: str) -> pd.Series:
+PROSTAD_REPORT_MEANS = {
+    "ref_to_mri": 13.0,
+    "mri_to_report": 14.0,
+    "report_to_biopmdt": 14.0,
+    "biopmdt_to_biopsy": 46.0,
+    "biopsy_to_pathrep": 53.0,
+    "treatmdt_to_outpat": 70.0,
+}
+
+
+def parse_date_series(series: pd.Series, style: str = "generic") -> pd.Series:
     s = series.astype(str).str.strip()
 
     if style == "uk":
@@ -80,14 +87,334 @@ def parse_date_series(series: pd.Series, style: str) -> pd.Series:
     return pd.to_datetime(s, errors="coerce")
 
 
-def compare_series(sim: pd.Series, real: pd.Series) -> dict:
-    sim = pd.to_numeric(sim, errors="coerce").dropna()
-    real = pd.to_numeric(real, errors="coerce").dropna()
+def build_obs_mix_result(seed: int) -> dict:
+    referral_schedule = generate_daily_referrals(
+        start_date=START_DATE,
+        n_days=N_DAYS,
+        lam_per_workday=LAM_PER_WORKDAY,
+        seed=seed,
+    )
 
-    if len(sim) == 0 or len(real) == 0:
+    cfg = build_combined_config(
+        "OBS_MIX",
+        start_date=START_DATE,
+        n_days=N_DAYS,
+        lam_per_workday=LAM_PER_WORKDAY,
+        seed=seed,
+    )
+
+    return run_day_loop_combined_engine(
+        cfg,
+        daily_referrals_override=referral_schedule,
+    )
+
+
+def extract_stage_waits_from_sim(result: dict, seed: int) -> pd.DataFrame:
+    rows: list[dict] = []
+
+    stage_pairs = [
+        ("referral_received", "mri_performed", "ref_to_mri"),
+        ("mri_performed", "mri_report_ready", "mri_to_report"),
+        ("mri_report_ready", "MDT_occured", "report_to_biopmdt"),
+        ("MDT_occured", "biopsy_done", "biopmdt_to_biopsy"),
+        ("biopsy_done", "Path_report_recieved", "biopsy_to_pathrep"),
+        ("Path_report_recieved", "Treatment_options_MDT_occured", "pathrep_to_treatmdt"),
+        ("Treatment_options_MDT_occured", "Outpatient_appointment_occured", "treatmdt_to_outpat"),
+    ]
+
+    for patient in result["all_patients_objects"]:
+        pathway_type = patient.data.get("pathway_type")
+        event_dates = {event["event"]: event["date"] for event in patient.events}
+
+        for start_event, end_event, stage_name in stage_pairs:
+            if start_event in event_dates and end_event in event_dates:
+                wait_days = (event_dates[end_event] - event_dates[start_event]).days
+                if wait_days >= 0:
+                    rows.append(
+                        {
+                            "seed": seed,
+                            "patient_id": patient.patient_id,
+                            "pathway_type": pathway_type,
+                            "stage": stage_name,
+                            "wait_days": wait_days,
+                        }
+                    )
+
+    return pd.DataFrame(rows)
+
+
+def extract_full_pathway_from_sim(result: dict, seed: int) -> pd.DataFrame:
+    rows: list[dict] = []
+
+    for patient in result["completed_patients_objects"]:
+        pathway_type = patient.data.get("pathway_type")
+        event_names = {e["event"] for e in patient.events}
+
+        if FULL_PATHWAY_EVENT not in event_names:
+            continue
+
+        rows.append(
+            {
+                "seed": seed,
+                "patient_id": patient.patient_id,
+                "pathway_type": pathway_type,
+                "total_days": (patient.current_date - patient.start_date).days,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def get_first_event_date(patient, event_name: str):
+    dates = [
+        event.get("date")
+        for event in patient.events
+        if event.get("event") == event_name and event.get("date") is not None
+    ]
+    return min(dates) if dates else None
+
+
+def extract_time_to_stage_from_sim(result: dict, seed: int) -> pd.DataFrame:
+    rows: list[dict] = []
+
+    for patient in result["all_patients_objects"]:
+        pathway_type = patient.data.get("pathway_type")
+        referral_date = get_first_event_date(patient, "referral_received")
+
+        if referral_date is None:
+            continue
+
+        for stage, endpoint_event in STAGE_ENDPOINT_EVENTS.items():
+            endpoint_date = get_first_event_date(patient, endpoint_event)
+
+            if endpoint_date is None:
+                continue
+
+            time_to_stage = (endpoint_date - referral_date).days
+
+            if time_to_stage >= 0:
+                rows.append(
+                    {
+                        "seed": seed,
+                        "patient_id": patient.patient_id,
+                        "pathway_type": pathway_type,
+                        "stage": stage,
+                        "time_to_stage_days": time_to_stage,
+                    }
+                )
+
+    return pd.DataFrame(rows)
+
+
+def load_real_prostad_stage_waits(data_dir: Path) -> pd.DataFrame:
+    rows: list[dict] = []
+
+    specs = {
+        "ref_to_mri": ("pros_ref_to_mri.csv", "Date of referral to pathway", "Date of MRI", "us"),
+        "mri_to_report": ("pros_mri_to_mriclin.csv", "Date of MRI", "Date of clinic", "us"),
+        "biopmdt_to_biopsy": ("pros_mriclin_to_biop.csv", "Date of clinic", "Date of biopsy", "us"),
+        "biopsy_to_pathrep": ("pros_biop_to_pathrep.csv", "Date of biopsy", "Date of pathology report", "us"),
+        "pathrep_to_treatmdt": ("pros_pathrep_to_treatmdt.csv", "Date of pathology report", "Date of MDT to discuss treatment options", "us"),
+        "treatmdt_to_outpat": ("pros_treatmdt_to_outpat.csv", "Date of MDT to discuss treatment options", "Date of OPD appt", "us"),
+    }
+
+    for stage, (filename, start_col, end_col, style) in specs.items():
+        df = pd.read_csv(data_dir / filename).copy()
+        start_dates = parse_date_series(df[start_col], style)
+        end_dates = parse_date_series(df[end_col], style)
+
+        waits = (end_dates - start_dates).dt.days
+        waits = waits[(waits.notna()) & (waits >= 0)]
+
+        for wait in waits:
+            rows.append({"stage": stage, "wait_days": float(wait)})
+
+    rows.append({"stage": "report_to_biopmdt", "wait_days": np.nan})
+
+    return pd.DataFrame(rows)
+
+
+def load_real_baseline_stage_waits(data_dir: Path) -> pd.DataFrame:
+    rows: list[dict] = []
+
+    specs = {
+        "ref_to_mri": ("pre_ref_to_mri.csv", "Date of referral to pathway", "Date of MRI", "uk"),
+        "mri_to_report": ("pre_mri_to_mrirep.csv", "Date of MRI", "Date MRI reported", "uk"),
+        "report_to_biopmdt": ("pre_mrirep_to_biopmdt.csv", "Date MRI reported", "Date of Prostate MRI MDT", "uk"),
+        "biopmdt_to_biopsy": ("pre_biopmdt_to_biop.csv", "Date of Prostate MRI MDT", "Date of Biopsy", "uk"),
+        "biopsy_to_pathrep": ("pre_biop_to_pathrep.csv", "Date of Biopsy", "Date of pathology report", "uk"),
+        "pathrep_to_treatmdt": ("pre_pathrep_to_treatmdt.csv", "Date of pathology report", "Date of MDT (treatment options)", "uk"),
+        "treatmdt_to_outpat": ("pre_treatmdt_to_outpat.csv", "Date of MDT (treatment options)", "Date of outpat appt", "uk"),
+    }
+
+    for stage, (filename, start_col, end_col, style) in specs.items():
+        df = pd.read_csv(data_dir / filename).copy()
+        start_dates = parse_date_series(df[start_col], style)
+        end_dates = parse_date_series(df[end_col], style)
+
+        waits = (end_dates - start_dates).dt.days
+        waits = waits[(waits.notna()) & (waits >= 0)]
+
+        for wait in waits:
+            rows.append({"stage": stage, "wait_days": float(wait)})
+
+    return pd.DataFrame(rows)
+
+
+def load_real_prostad_full_pathway(data_dir: Path) -> pd.DataFrame:
+    _, real_pros_path = load_real_pathway_data(
+        str(data_dir / "pre_pathway.csv"),
+        str(data_dir / "pros_pathway.csv"),
+    )
+
+    real_pros_path = real_pros_path[
+        real_pros_path["total_days"].notna()
+        & (real_pros_path["total_days"] >= 0)
+    ].copy()
+
+    return real_pros_path[["total_days"]]
+
+
+def load_real_baseline_full_pathway(data_dir: Path) -> pd.DataFrame:
+    real_pre_path, _ = load_real_pathway_data(
+        str(data_dir / "pre_pathway.csv"),
+        str(data_dir / "pros_pathway.csv"),
+    )
+
+    real_pre_path = real_pre_path[
+        real_pre_path["total_days"].notna()
+        & (real_pre_path["total_days"] >= 0)
+    ].copy()
+
+    return real_pre_path[["total_days"]]
+
+
+def load_real_prostad_time_to_stage(data_dir: Path) -> pd.DataFrame:
+    rows: list[dict] = []
+
+    ref_mri = pd.read_csv(data_dir / "pros_ref_to_mri.csv").copy()
+    ref_mri["patient_id"] = ref_mri["Subject number"]
+    ref_mri["referral_date"] = parse_date_series(ref_mri["Date of referral to pathway"], "us")
+    ref_mri["mri_date"] = parse_date_series(ref_mri["Date of MRI"], "us")
+
+    clinic = pd.read_csv(data_dir / "pros_mri_to_mriclin.csv").copy()
+    clinic["patient_id"] = clinic["Subject number"]
+    clinic["clinic_date"] = parse_date_series(clinic["Date of clinic"], "us")
+
+    biopsy = pd.read_csv(data_dir / "pros_mriclin_to_biop.csv").copy()
+    biopsy["patient_id"] = biopsy["Subject number"]
+    biopsy["biopsy_date"] = parse_date_series(biopsy["Date of biopsy"], "us")
+
+    pathrep = pd.read_csv(data_dir / "pros_biop_to_pathrep.csv").copy()
+    pathrep["patient_id"] = pathrep["Subject number"]
+    pathrep["pathrep_date"] = parse_date_series(pathrep["Date of pathology report"], "us")
+
+    treatmdt = pd.read_csv(data_dir / "pros_pathrep_to_treatmdt.csv").copy()
+    treatmdt["patient_id"] = treatmdt["Subject number"]
+    treatmdt["treatmdt_date"] = parse_date_series(
+        treatmdt["Date of MDT to discuss treatment options"], "us"
+    )
+
+    outpat = pd.read_csv(data_dir / "pros_treatmdt_to_outpat.csv").copy()
+    outpat["patient_id"] = outpat["Subject number"]
+    outpat["outpat_date"] = parse_date_series(outpat["Date of OPD appt"], "us")
+
+    merged = ref_mri[["patient_id", "referral_date", "mri_date"]]
+
+    stage_date_sources = {
+        "ref_to_mri": ("mri_date", merged),
+        "mri_to_report": ("clinic_date", merged.merge(clinic[["patient_id", "clinic_date"]], on="patient_id", how="inner")),
+        "report_to_biopmdt": ("clinic_date", merged.merge(clinic[["patient_id", "clinic_date"]], on="patient_id", how="inner")),
+        "biopmdt_to_biopsy": ("biopsy_date", merged.merge(biopsy[["patient_id", "biopsy_date"]], on="patient_id", how="inner")),
+        "biopsy_to_pathrep": ("pathrep_date", merged.merge(pathrep[["patient_id", "pathrep_date"]], on="patient_id", how="inner")),
+        "pathrep_to_treatmdt": ("treatmdt_date", merged.merge(treatmdt[["patient_id", "treatmdt_date"]], on="patient_id", how="inner")),
+        "treatmdt_to_outpat": ("outpat_date", merged.merge(outpat[["patient_id", "outpat_date"]], on="patient_id", how="inner")),
+    }
+
+    for stage, (date_col, df) in stage_date_sources.items():
+        waits = (df[date_col] - df["referral_date"]).dt.days
+        waits = waits[(waits.notna()) & (waits >= 0)]
+
+        for wait in waits:
+            rows.append({"stage": stage, "time_to_stage_days": float(wait)})
+
+    return pd.DataFrame(rows)
+
+
+def load_real_baseline_time_to_stage(data_dir: Path) -> pd.DataFrame:
+    rows: list[dict] = []
+
+    ref_mri = pd.read_csv(data_dir / "pre_ref_to_mri.csv").copy()
+    ref_mri["patient_id"] = ref_mri["Subject number"]
+    ref_mri["referral_date"] = parse_date_series(ref_mri["Date of referral to pathway"], "uk")
+    ref_mri["mri_date"] = parse_date_series(ref_mri["Date of MRI"], "uk")
+
+    mri_report = pd.read_csv(data_dir / "pre_mri_to_mrirep.csv").copy()
+    mri_report["patient_id"] = mri_report["Subject number"]
+    mri_report["report_date"] = parse_date_series(mri_report["Date MRI reported"], "uk")
+
+    biopsy_mdt = pd.read_csv(data_dir / "pre_mrirep_to_biopmdt.csv").copy()
+    biopsy_mdt["patient_id"] = biopsy_mdt["Subject number"]
+    biopsy_mdt["biopsy_mdt_date"] = parse_date_series(
+        biopsy_mdt["Date of Prostate MRI MDT"], "uk"
+    )
+
+    biopsy = pd.read_csv(data_dir / "pre_biopmdt_to_biop.csv").copy()
+    biopsy["patient_id"] = biopsy["Subject number"]
+    biopsy["biopsy_date"] = parse_date_series(biopsy["Date of Biopsy"], "uk")
+
+    pathrep = pd.read_csv(data_dir / "pre_biop_to_pathrep.csv").copy()
+    pathrep["patient_id"] = pathrep["Subject number"]
+    pathrep["pathrep_date"] = parse_date_series(pathrep["Date of pathology report"], "uk")
+
+    treatmdt = pd.read_csv(data_dir / "pre_pathrep_to_treatmdt.csv").copy()
+    treatmdt["patient_id"] = treatmdt["Subject number"]
+    treatmdt["treatmdt_date"] = parse_date_series(
+        treatmdt["Date of MDT (treatment options)"], "uk"
+    )
+
+    outpat = pd.read_csv(data_dir / "pre_treatmdt_to_outpat.csv").copy()
+    outpat["patient_id"] = outpat["Subject number"]
+    outpat["outpat_date"] = parse_date_series(outpat["Date of outpat appt"], "uk")
+
+    base = ref_mri[["patient_id", "referral_date", "mri_date"]]
+
+    stage_date_sources = {
+        "ref_to_mri": ("mri_date", base),
+        "mri_to_report": ("report_date", base.merge(mri_report[["patient_id", "report_date"]], on="patient_id", how="inner")),
+        "report_to_biopmdt": ("biopsy_mdt_date", base.merge(biopsy_mdt[["patient_id", "biopsy_mdt_date"]], on="patient_id", how="inner")),
+        "biopmdt_to_biopsy": ("biopsy_date", base.merge(biopsy[["patient_id", "biopsy_date"]], on="patient_id", how="inner")),
+        "biopsy_to_pathrep": ("pathrep_date", base.merge(pathrep[["patient_id", "pathrep_date"]], on="patient_id", how="inner")),
+        "pathrep_to_treatmdt": ("treatmdt_date", base.merge(treatmdt[["patient_id", "treatmdt_date"]], on="patient_id", how="inner")),
+        "treatmdt_to_outpat": ("outpat_date", base.merge(outpat[["patient_id", "outpat_date"]], on="patient_id", how="inner")),
+    }
+
+    for stage, (date_col, df) in stage_date_sources.items():
+        waits = (df[date_col] - df["referral_date"]).dt.days
+        waits = waits[(waits.notna()) & (waits >= 0)]
+
+        for wait in waits:
+            rows.append({"stage": stage, "time_to_stage_days": float(wait)})
+
+    return pd.DataFrame(rows)
+
+
+def ecdf(values: Iterable[float]) -> tuple[np.ndarray, np.ndarray]:
+    x = np.asarray(list(values), dtype=float)
+    x = x[~np.isnan(x)]
+    x = np.sort(x)
+    y = np.arange(1, len(x) + 1) / len(x) if len(x) else np.array([])
+    return x, y
+
+
+def compare_distributions(sim_series: pd.Series, real_series: pd.Series) -> dict:
+    sim_series = pd.to_numeric(sim_series, errors="coerce").dropna()
+    real_series = pd.to_numeric(real_series, errors="coerce").dropna()
+
+    if len(sim_series) == 0 or len(real_series) == 0:
         return {
-            "n_sim": len(sim),
-            "n_real": len(real),
+            "n_sim": len(sim_series),
+            "n_real": len(real_series),
             "mean_sim": np.nan,
             "mean_real": np.nan,
             "median_sim": np.nan,
@@ -100,1013 +427,671 @@ def compare_series(sim: pd.Series, real: pd.Series) -> dict:
             "ks_pvalue": np.nan,
         }
 
-    ks = ks_2samp(sim, real)
+    ks_stat, ks_p = ks_2samp(sim_series, real_series)
 
     return {
-        "n_sim": int(len(sim)),
-        "n_real": int(len(real)),
-        "mean_sim": float(sim.mean()),
-        "mean_real": float(real.mean()),
-        "median_sim": float(sim.median()),
-        "median_real": float(real.median()),
-        "p90_sim": float(np.percentile(sim, 90)),
-        "p90_real": float(np.percentile(real, 90)),
-        "mean_diff": float(sim.mean() - real.mean()),
-        "median_diff": float(sim.median() - real.median()),
-        "ks_stat": float(ks.statistic),
-        "ks_pvalue": float(ks.pvalue),
+        "n_sim": int(len(sim_series)),
+        "n_real": int(len(real_series)),
+        "mean_sim": float(sim_series.mean()),
+        "mean_real": float(real_series.mean()),
+        "median_sim": float(sim_series.median()),
+        "median_real": float(real_series.median()),
+        "p90_sim": float(np.percentile(sim_series, 90)),
+        "p90_real": float(np.percentile(real_series, 90)),
+        "mean_diff": float(sim_series.mean() - real_series.mean()),
+        "median_diff": float(sim_series.median() - real_series.median()),
+        "ks_stat": float(ks_stat),
+        "ks_pvalue": float(ks_p),
     }
 
 
-def read_pros_mri_to_mriclin(data_dir: Path) -> pd.DataFrame:
-    df = pd.read_csv(data_dir / "pros_mri_to_mriclin.csv").copy()
-    df = df.rename(columns={"Subject number": "patient_id"})
+def compare_mean_difference(group_a: pd.Series, group_b: pd.Series) -> dict:
+    a = pd.to_numeric(group_a, errors="coerce").dropna().to_numpy()
+    b = pd.to_numeric(group_b, errors="coerce").dropna().to_numpy()
 
-    required = ["patient_id", "Date of MRI", "Date of clinic"]
-    missing = [c for c in required if c not in df.columns]
-    if missing:
-        raise ValueError(
-            f"pros_mri_to_mriclin.csv is missing expected columns {missing}. "
-            f"Available columns: {list(df.columns)}"
-        )
+    if len(a) < 2 or len(b) < 2:
+        return {
+            "difference": np.nan,
+            "ci_low": np.nan,
+            "ci_high": np.nan,
+            "p_value": np.nan,
+        }
 
-    return df[required].copy()
+    mean_diff = a.mean() - b.mean()
+    var_a = a.var(ddof=1)
+    var_b = b.var(ddof=1)
+    se = np.sqrt((var_a / len(a)) + (var_b / len(b)))
 
+    df_num = ((var_a / len(a)) + (var_b / len(b))) ** 2
+    df_den = ((var_a / len(a)) ** 2 / (len(a) - 1)) + ((var_b / len(b)) ** 2 / (len(b) - 1))
+    welch_df = df_num / df_den
 
-def load_real_stage_waits(data_dir: Path) -> pd.DataFrame:
-    rows: list[dict] = []
+    from scipy.stats import t
 
-    for dataset, specs in REAL_STAGE_SPECS.items():
-        for stage, (fname, col1, col2, style) in specs.items():
-            if dataset == "pros" and stage == "mri_to_report":
-                df = read_pros_mri_to_mriclin(data_dir)
-                d1 = parse_date_series(df["Date of MRI"], "us")
-                d2 = parse_date_series(df["Date of clinic"], "us")
-                waits = (d2 - d1).dt.days
-                waits = waits[(waits.notna()) & (waits >= 0)]
+    t_crit = t.ppf(0.975, welch_df)
 
-                for w in waits:
-                    rows.append(
-                        {
-                            "source_dataset": dataset,
-                            "stage": "mri_to_decision_combined",
-                            "wait_days": float(w),
-                        }
-                    )
-                continue
+    test = ttest_ind(a, b, equal_var=False, nan_policy="omit")
 
-            df = pd.read_csv(data_dir / fname).copy()
-            d1 = parse_date_series(df[col1], style)
-            d2 = parse_date_series(df[col2], style)
-            waits = (d2 - d1).dt.days
-            waits = waits[(waits.notna()) & (waits >= 0)]
-
-            for w in waits:
-                rows.append(
-                    {
-                        "source_dataset": dataset,
-                        "stage": stage,
-                        "wait_days": float(w),
-                    }
-                )
-
-    return pd.DataFrame(rows)
+    return {
+        "difference": float(mean_diff),
+        "ci_low": float(mean_diff - t_crit * se),
+        "ci_high": float(mean_diff + t_crit * se),
+        "p_value": float(test.pvalue),
+    }
 
 
-def load_real_pathway_lengths(data_dir: Path) -> pd.DataFrame:
-    frames: list[pd.DataFrame] = []
-
-    for dataset, (fname, style) in PATHWAY_FILES.items():
-        df = pd.read_csv(data_dir / fname).copy()
-        df["referral_date"] = parse_date_series(df["referral_date"], style)
-        df["outpatient_date"] = parse_date_series(df["outpatient_date"], style)
-        df["total_days"] = (df["outpatient_date"] - df["referral_date"]).dt.days
-        df = df[(df["total_days"].notna()) & (df["total_days"] >= 0)].copy()
-        df["source_dataset"] = dataset
-        frames.append(df[["source_dataset", "total_days"]])
-
-    return pd.concat(frames, ignore_index=True)
-
-
-def extract_stage_waits_with_pathway_type(
-    result: dict,
-    scenario_name: str,
-    seed: int | None = None,
+def build_table8_mixed_sim_comparison(
+    sim_time_to_stage: pd.DataFrame,
+    real_pros_time_to_stage: pd.DataFrame,
+    real_standard_time_to_stage: pd.DataFrame,
 ) -> pd.DataFrame:
     rows: list[dict] = []
 
-    event_pair_to_stage = {
-        ("referral_received", "mri_performed"): "ref_to_mri",
-        ("mri_performed", "mri_report_ready"): "mri_to_report",
-        ("mri_report_ready", "MDT_occured"): "report_to_biopmdt",
-        ("MDT_occured", "biopsy_done"): "biopmdt_to_biopsy",
-        ("biopsy_done", "Path_report_recieved"): "biopsy_to_pathrep",
-        ("Path_report_recieved", "Treatment_options_MDT_occured"): "pathrep_to_treatmdt",
-        ("Treatment_options_MDT_occured", "Outpatient_appointment_occured"): "treatmdt_to_outpat",
+    table_stages = [
+        "ref_to_mri",
+        "mri_to_report",
+        "report_to_biopmdt",
+        "biopmdt_to_biopsy",
+        "biopsy_to_pathrep",
+        "treatmdt_to_outpat",
+    ]
+
+    table_labels = {
+        "ref_to_mri": "Time to MRI",
+        "mri_to_report": "Time to MRI reporting",
+        "report_to_biopmdt": "Time to clinical decision whether to biopsy",
+        "biopmdt_to_biopsy": "Time to biopsy",
+        "biopsy_to_pathrep": "Time to diagnosis",
+        "treatmdt_to_outpat": "Time to outpatient appointment where patient informed of diagnosis",
     }
 
-    for patient in result.get("completed_patients_objects", []):
-        events = sorted(patient.events, key=lambda x: x["date"])
-        pathway_type = patient.data.get("pathway_type")
-
-        for i in range(len(events) - 1):
-            e1 = events[i]
-            e2 = events[i + 1]
-            stage = event_pair_to_stage.get((e1["event"], e2["event"]))
-            if stage is None:
-                continue
-
-            rows.append(
-                {
-                    "scenario": scenario_name,
-                    "seed": seed,
-                    "patient_id": patient.patient_id,
-                    "pathway_type": pathway_type,
-                    "stage": stage,
-                    "wait_days": (e2["date"] - e1["date"]).days,
-                }
-            )
-
-    return pd.DataFrame(rows)
-
-
-def add_combined_prostad_stage(sim_stage_df: pd.DataFrame) -> pd.DataFrame:
-    if sim_stage_df.empty:
-        return sim_stage_df
-
-    prostad = sim_stage_df[sim_stage_df["pathway_type"] == "PROSTAD"].copy()
-    non_prostad = sim_stage_df[sim_stage_df["pathway_type"] != "PROSTAD"].copy()
-
-    mri_report = prostad[prostad["stage"] == "mri_to_report"].copy()
-    report_mdt = prostad[prostad["stage"] == "report_to_biopmdt"].copy()
-
-    combined = mri_report.merge(
-        report_mdt,
-        on=["scenario", "seed", "patient_id", "pathway_type"],
-        suffixes=("_mri", "_mdt"),
-    )
-
-    if not combined.empty:
-        combined["stage"] = "mri_to_decision_combined"
-        combined["wait_days"] = combined["wait_days_mri"] + combined["wait_days_mdt"]
-        combined = combined[
-            ["scenario", "seed", "patient_id", "pathway_type", "stage", "wait_days"]
+    for stage in table_stages:
+        real_pros = real_pros_time_to_stage.loc[
+            real_pros_time_to_stage["stage"] == stage,
+            "time_to_stage_days",
         ]
 
-    # Drop the two split stages for PROSTAD, replace with combined version
-    prostad = prostad[~prostad["stage"].isin(["mri_to_report", "report_to_biopmdt"])]
+        real_standard = real_standard_time_to_stage.loc[
+            real_standard_time_to_stage["stage"] == stage,
+            "time_to_stage_days",
+        ]
 
-    out = pd.concat([non_prostad, prostad, combined], ignore_index=True)
-    return out
+        sim_pros = sim_time_to_stage.loc[
+            (sim_time_to_stage["pathway_type"] == "PROSTAD")
+            & (sim_time_to_stage["stage"] == stage),
+            "time_to_stage_days",
+        ]
 
+        sim_standard = sim_time_to_stage.loc[
+            (sim_time_to_stage["pathway_type"] == "BASELINE")
+            & (sim_time_to_stage["stage"] == stage),
+            "time_to_stage_days",
+        ]
 
-def extract_full_pathway_lengths_with_pathway_type(
-    result: dict,
-    scenario_name: str,
-    seed: int | None = None,
-) -> pd.DataFrame:
-    rows: list[dict] = []
-
-    for patient in result.get("completed_patients_objects", []):
-        event_names = {e["event"] for e in patient.events}
-        if "Outpatient_appointment_occured" not in event_names:
-            continue
-
-        rows.append(
-            {
-                "scenario": scenario_name,
-                "seed": seed,
-                "patient_id": patient.patient_id,
-                "pathway_type": patient.data.get("pathway_type"),
-                "total_days": (patient.current_date - patient.start_date).days,
-            }
-        )
-
-    return pd.DataFrame(rows)
-
-
-def make_prostad_decision_to_biopsy_ecdf(obs_mix_result: dict, data_dir: Path) -> None:
-    """
-    ECDF for PROSTAD patients only:
-      simulated MDT/clinic decision -> biopsy
-      vs observed PROSTAD clinic -> biopsy.
-    """
-
-    # Simulated PROSTAD: MDT_occured -> biopsy_done
-    sim_stage = extract_stage_waits_with_pathway_type(obs_mix_result, "OBS_MIX")
-
-    sim_series = sim_stage.loc[
-        (sim_stage["pathway_type"] == "PROSTAD")
-        & (sim_stage["stage"] == "biopmdt_to_biopsy"),
-        "wait_days",
-    ]
-
-    # Observed PROSTAD: clinic -> biopsy
-    real_df = pd.read_csv(data_dir / "pros_mriclin_to_biop.csv").copy()
-
-    real_df["clinic_date"] = parse_date_series(real_df["Date of clinic"], "us")
-    real_df["biopsy_date"] = parse_date_series(real_df["Date of biopsy"], "us")
-
-    real_series = (real_df["biopsy_date"] - real_df["clinic_date"]).dt.days
-    real_series = real_series[(real_series.notna()) & (real_series >= 0)]
-
-    print("\n=== PROSTAD DECISION/CLINIC → BIOPSY ECDF CHECK ===")
-    print(f"Sim n:  {len(sim_series.dropna())}")
-    print(f"Real n: {len(real_series.dropna())}")
-    print(f"Sim mean:  {sim_series.mean():.3f}")
-    print(f"Real mean: {real_series.mean():.3f}")
-
-    output_path = OUTPUT_DIR / "ecdf_mixed_prostad_decision_to_biopsy.png"
-
-    plot_ecdf(
-        real=real_series,
-        sim=sim_series,
-        title="PROSTAD pathway in mixed simulation vs PROSTAD data: clinic/decision → biopsy",
-        xlab="Wait days",
-        output_path=output_path,
-    )
-
-
-def extract_cumulative_times_with_pathway_type(
-    result: dict,
-    scenario_name: str,
-) -> pd.DataFrame:
-    rows: list[dict] = []
-
-    milestone_map = {
-        "mri_performed": "time_to_mri",
-        "mri_report_ready": "time_to_mri_reporting",
-        "MDT_occured": "time_to_biopsy_decision",
-        "biopsy_done": "time_to_biopsy",
-        "Path_report_recieved": "time_to_diagnosis",
-        "Outpatient_appointment_occured": "time_to_outpatient_diagnosis",
-    }
-
-    for patient in result.get("completed_patients_objects", []):
-        referral_date = patient.start_date
-        pathway_type = patient.data.get("pathway_type")
-
-        for event in patient.events:
-            event_name = event.get("event")
-            event_date = event.get("date")
-
-            if event_name in milestone_map and event_date is not None:
-                rows.append(
-                    {
-                        "scenario": scenario_name,
-                        "patient_id": patient.patient_id,
-                        "pathway_type": pathway_type,
-                        "metric": milestone_map[event_name],
-                        "days_from_referral": (event_date - referral_date).days,
-                    }
-                )
-
-    return pd.DataFrame(rows)
-
-
-def calculate_observed_pre_cumulative_values(data_dir: Path) -> dict[str, float]:
-    observed: dict[str, float] = {}
-
-    ref_mri = pd.read_csv(data_dir / "pre_ref_to_mri.csv").copy()
-    ref_mri = ref_mri.rename(columns={"Subject number": "patient_id"})
-    ref_mri["referral_date"] = parse_date_series(ref_mri["Date of referral to pathway"], "uk")
-    ref_mri["mri_date"] = parse_date_series(ref_mri["Date of MRI"], "uk")
-
-    mri_rep = pd.read_csv(data_dir / "pre_mri_to_mrirep.csv").copy()
-    mri_rep = mri_rep.rename(columns={"Subject number": "patient_id"})
-    mri_rep["report_date"] = parse_date_series(mri_rep["Date MRI reported"], "uk")
-
-    rep_mdt = pd.read_csv(data_dir / "pre_mrirep_to_biopmdt.csv").copy()
-    rep_mdt = rep_mdt.rename(columns={"Subject number": "patient_id"})
-    rep_mdt["mdt_date"] = parse_date_series(rep_mdt["Date of Prostate MRI MDT"], "uk")
-
-    mdt_biop = pd.read_csv(data_dir / "pre_biopmdt_to_biop.csv").copy()
-    mdt_biop = mdt_biop.rename(columns={"Subject number": "patient_id"})
-    mdt_biop["biopsy_date"] = parse_date_series(mdt_biop["Date of Biopsy"], "uk")
-
-    biop_path = pd.read_csv(data_dir / "pre_biop_to_pathrep.csv").copy()
-    biop_path = biop_path.rename(columns={"Subject number": "patient_id"})
-    biop_path["pathrep_date"] = parse_date_series(biop_path["Date of pathology report"], "uk")
-
-    pathway = pd.read_csv(data_dir / "pre_pathway.csv").copy()
-    pathway["referral_date"] = parse_date_series(pathway["referral_date"], "uk")
-    pathway["outpatient_date"] = parse_date_series(pathway["outpatient_date"], "uk")
-
-    waits = (ref_mri["mri_date"] - ref_mri["referral_date"]).dt.days
-    waits = waits[(waits.notna()) & (waits >= 0)]
-    observed["time_to_mri"] = float(waits.mean()) if len(waits) else np.nan
-
-    merged = ref_mri[["patient_id", "referral_date"]].merge(
-        mri_rep[["patient_id", "report_date"]],
-        on="patient_id",
-        how="inner",
-    )
-    waits = (merged["report_date"] - merged["referral_date"]).dt.days
-    waits = waits[(waits.notna()) & (waits >= 0)]
-    observed["time_to_mri_reporting"] = float(waits.mean()) if len(waits) else np.nan
-
-    merged = ref_mri[["patient_id", "referral_date"]].merge(
-        rep_mdt[["patient_id", "mdt_date"]],
-        on="patient_id",
-        how="inner",
-    )
-    waits = (merged["mdt_date"] - merged["referral_date"]).dt.days
-    waits = waits[(waits.notna()) & (waits >= 0)]
-    observed["time_to_biopsy_decision"] = float(waits.mean()) if len(waits) else np.nan
-
-    merged = ref_mri[["patient_id", "referral_date"]].merge(
-        mdt_biop[["patient_id", "biopsy_date"]],
-        on="patient_id",
-        how="inner",
-    )
-    waits = (merged["biopsy_date"] - merged["referral_date"]).dt.days
-    waits = waits[(waits.notna()) & (waits >= 0)]
-    observed["time_to_biopsy"] = float(waits.mean()) if len(waits) else np.nan
-
-    merged = ref_mri[["patient_id", "referral_date"]].merge(
-        biop_path[["patient_id", "pathrep_date"]],
-        on="patient_id",
-        how="inner",
-    )
-    waits = (merged["pathrep_date"] - merged["referral_date"]).dt.days
-    waits = waits[(waits.notna()) & (waits >= 0)]
-    observed["time_to_diagnosis"] = float(waits.mean()) if len(waits) else np.nan
-
-    waits = (pathway["outpatient_date"] - pathway["referral_date"]).dt.days
-    waits = waits[(waits.notna()) & (waits >= 0)]
-    observed["time_to_outpatient_diagnosis"] = float(waits.mean()) if len(waits) else np.nan
-
-    return observed
-
-
-def calculate_observed_prostad_cumulative_values(data_dir: Path) -> dict[str, float]:
-    observed: dict[str, float] = {}
-
-    ref_mri = pd.read_csv(data_dir / "pros_ref_to_mri.csv").copy()
-    ref_mri = ref_mri.rename(columns={"Subject number": "patient_id"})
-    ref_mri["referral_date"] = parse_date_series(ref_mri["Date of referral to pathway"], "us")
-    ref_mri["mri_date"] = parse_date_series(ref_mri["Date of MRI"], "us")
-
-    mri_clinic = read_pros_mri_to_mriclin(data_dir).copy()
-    mri_clinic["clinic_date"] = parse_date_series(mri_clinic["Date of clinic"], "us")
-
-    clinic_biop = pd.read_csv(data_dir / "pros_mriclin_to_biop.csv").copy()
-    clinic_biop = clinic_biop.rename(columns={"Subject number": "patient_id"})
-    clinic_biop["biopsy_date"] = parse_date_series(clinic_biop["Date of biopsy"], "us")
-
-    biop_path = pd.read_csv(data_dir / "pros_biop_to_pathrep.csv").copy()
-    biop_path = biop_path.rename(columns={"Subject number": "patient_id"})
-    biop_path["pathrep_date"] = parse_date_series(biop_path["Date of pathology report"], "us")
-
-    pathway = pd.read_csv(data_dir / "pros_pathway.csv").copy()
-    pathway["referral_date"] = parse_date_series(pathway["referral_date"], "generic")
-    pathway["outpatient_date"] = parse_date_series(pathway["outpatient_date"], "generic")
-
-    waits = (ref_mri["mri_date"] - ref_mri["referral_date"]).dt.days
-    waits = waits[(waits.notna()) & (waits >= 0)]
-    observed["time_to_mri"] = float(waits.mean()) if len(waits) else np.nan
-
-    merged = ref_mri[["patient_id", "referral_date"]].merge(
-        mri_clinic[["patient_id", "clinic_date"]],
-        on="patient_id",
-        how="inner",
-    )
-    waits = (merged["clinic_date"] - merged["referral_date"]).dt.days
-    waits = waits[(waits.notna()) & (waits >= 0)]
-    observed["time_to_mri_reporting"] = float(waits.mean()) if len(waits) else np.nan
-
-    observed["time_to_biopsy_decision"] = np.nan
-
-    merged = ref_mri[["patient_id", "referral_date"]].merge(
-        clinic_biop[["patient_id", "biopsy_date"]],
-        on="patient_id",
-        how="inner",
-    )
-    waits = (merged["biopsy_date"] - merged["referral_date"]).dt.days
-    waits = waits[(waits.notna()) & (waits >= 0)]
-    observed["time_to_biopsy"] = float(waits.mean()) if len(waits) else np.nan
-
-    merged = ref_mri[["patient_id", "referral_date"]].merge(
-        biop_path[["patient_id", "pathrep_date"]],
-        on="patient_id",
-        how="inner",
-    )
-    waits = (merged["pathrep_date"] - merged["referral_date"]).dt.days
-    waits = waits[(waits.notna()) & (waits >= 0)]
-    observed["time_to_diagnosis"] = float(waits.mean()) if len(waits) else np.nan
-
-    waits = (pathway["outpatient_date"] - pathway["referral_date"]).dt.days
-    waits = waits[(waits.notna()) & (waits >= 0)]
-    observed["time_to_outpatient_diagnosis"] = float(waits.mean()) if len(waits) else np.nan
-
-    return observed
-
-
-def build_table8_like_comparison(obs_mix_result: dict, data_dir: Path) -> pd.DataFrame:
-    sim_cum = extract_cumulative_times_with_pathway_type(obs_mix_result, "OBS_MIX")
-    sim_pros = sim_cum[sim_cum["pathway_type"] == "PROSTAD"].copy()
-
-    observed = calculate_observed_prostad_cumulative_values(data_dir)
-
-    report_lookup = {
-        "time_to_mri": PROSTAD_REPORT_OVERALL["PROSTAD_mean_time_to_mri"],
-        "time_to_mri_reporting": PROSTAD_REPORT_OVERALL["PROSTAD_mean_time_to_mri_reporting"],
-        "time_to_biopsy_decision": PROSTAD_REPORT_OVERALL["PROSTAD_mean_time_to_biopsy_decision"],
-        "time_to_biopsy": PROSTAD_REPORT_OVERALL["PROSTAD_mean_time_to_biopsy"],
-        "time_to_diagnosis": PROSTAD_REPORT_OVERALL["PROSTAD_mean_time_to_diagnosis"],
-        "time_to_outpatient_diagnosis": PROSTAD_REPORT_OVERALL["PROSTAD_mean_time_to_outpatient_diagnosis"],
-    }
-
-    rows: list[dict] = []
-    for metric, label in CUMULATIVE_METRIC_LABELS.items():
-        sim_series = sim_pros.loc[sim_pros["metric"] == metric, "days_from_referral"]
-        real_mean = observed.get(metric, np.nan)
-        report_mean = report_lookup.get(metric, np.nan)
+        real_diff = compare_mean_difference(real_pros, real_standard)
+        sim_diff = compare_mean_difference(sim_pros, sim_standard)
 
         rows.append(
             {
-                "metric": metric,
-                "label": label,
-                "n_sim": int(len(sim_series)),
-                "sim_mean": float(sim_series.mean()) if len(sim_series) else np.nan,
-                "sim_median": float(sim_series.median()) if len(sim_series) else np.nan,
-                "sim_p90": float(np.percentile(sim_series, 90)) if len(sim_series) else np.nan,
-                "observed_mean": real_mean,
-                "report_mean": report_mean,
-                "sim_minus_observed": (
-                    float(sim_series.mean()) - real_mean
-                    if len(sim_series) and pd.notna(real_mean)
-                    else np.nan
-                ),
-                "sim_minus_report": (
-                    float(sim_series.mean()) - report_mean
-                    if len(sim_series) and pd.notna(report_mean)
-                    else np.nan
-                ),
-                "observed_minus_report": (
-                    real_mean - report_mean
-                    if pd.notna(real_mean) and pd.notna(report_mean)
-                    else np.nan
-                ),
-            }
-        )
-
-    return pd.DataFrame(rows)
-
-
-def validate_obs_mix_subgroups_stage_level(obs_mix_result: dict, data_dir: Path) -> pd.DataFrame:
-    sim_stage = extract_stage_waits_with_pathway_type(obs_mix_result, "OBS_MIX")
-    sim_stage = add_combined_prostad_stage(sim_stage)
-    real_stage = load_real_stage_waits(data_dir)
-
-    subgroup_map = {
-        "BASELINE": "pre",
-        "PROSTAD": "pros",
-    }
-
-    rows: list[dict] = []
-
-    for pathway_type, real_dataset in subgroup_map.items():
-        sim_subset = sim_stage[sim_stage["pathway_type"] == pathway_type]
-
-        for stage in sorted(sim_subset["stage"].dropna().unique()):
-            sim_series = sim_subset.loc[sim_subset["stage"] == stage, "wait_days"]
-            real_series = real_stage.loc[
-                (real_stage["source_dataset"] == real_dataset)
-                & (real_stage["stage"] == stage),
-                "wait_days",
-            ]
-
-            row = {
-                "comparison": f"OBS_MIX {pathway_type} vs {real_dataset}",
-                "pathway_type": pathway_type,
-                "real_dataset": real_dataset,
                 "stage": stage,
-                "label": STAGE_LABELS.get(stage, stage),
+                "label": table_labels.get(stage, stage),
+                "real_prostad_n": int(real_pros.dropna().shape[0]),
+                "real_prostad_mean": float(real_pros.mean()) if len(real_pros.dropna()) else np.nan,
+                "real_prostad_median": float(real_pros.median()) if len(real_pros.dropna()) else np.nan,
+                "real_standard_n": int(real_standard.dropna().shape[0]),
+                "real_standard_mean": float(real_standard.mean()) if len(real_standard.dropna()) else np.nan,
+                "real_standard_median": float(real_standard.median()) if len(real_standard.dropna()) else np.nan,
+                "real_difference_mean": real_diff["difference"],
+                "real_difference_ci_low": real_diff["ci_low"],
+                "real_difference_ci_high": real_diff["ci_high"],
+                "real_difference_p_value": real_diff["p_value"],
+                "sim_prostad_n": int(sim_pros.dropna().shape[0]),
+                "sim_prostad_mean": float(sim_pros.mean()) if len(sim_pros.dropna()) else np.nan,
+                "sim_prostad_median": float(sim_pros.median()) if len(sim_pros.dropna()) else np.nan,
+                "sim_standard_n": int(sim_standard.dropna().shape[0]),
+                "sim_standard_mean": float(sim_standard.mean()) if len(sim_standard.dropna()) else np.nan,
+                "sim_standard_median": float(sim_standard.median()) if len(sim_standard.dropna()) else np.nan,
+                "sim_difference_mean": sim_diff["difference"],
+                "sim_difference_ci_low": sim_diff["ci_low"],
+                "sim_difference_ci_high": sim_diff["ci_high"],
+                "sim_difference_p_value": sim_diff["p_value"],
             }
-            row.update(compare_series(sim_series, real_series))
-            rows.append(row)
-
-    return pd.DataFrame(rows)
-
-
-def validate_obs_mix_subgroups_full_pathway(obs_mix_result: dict, data_dir: Path) -> pd.DataFrame:
-    sim_path = extract_full_pathway_lengths_with_pathway_type(obs_mix_result, "OBS_MIX")
-    real_path = load_real_pathway_lengths(data_dir)
-
-    subgroup_map = {
-        "BASELINE": "pre",
-        "PROSTAD": "pros",
-    }
-
-    rows: list[dict] = []
-
-    for pathway_type, real_dataset in subgroup_map.items():
-        sim_series = sim_path.loc[sim_path["pathway_type"] == pathway_type, "total_days"]
-        real_series = real_path.loc[real_path["source_dataset"] == real_dataset, "total_days"]
-
-        row = {
-            "comparison": f"OBS_MIX {pathway_type} vs {real_dataset}",
-            "pathway_type": pathway_type,
-            "real_dataset": real_dataset,
-            "stage": "full_pathway",
-            "label": "Full pathway",
-        }
-        row.update(compare_series(sim_series, real_series))
-        rows.append(row)
-
-    return pd.DataFrame(rows)
-
-
-def plot_ecdf(real: pd.Series, sim: pd.Series, title: str, xlab: str, output_path: Path) -> None:
-    real = pd.to_numeric(real, errors="coerce").dropna().sort_values().to_numpy()
-    sim = pd.to_numeric(sim, errors="coerce").dropna().sort_values().to_numpy()
-
-    if len(real) == 0 or len(sim) == 0:
-        print(f"SKIPPED ECDF: {title}")
-        print(f"  real n = {len(real)}")
-        print(f"  sim n  = {len(sim)}")
-        return
-
-    real_y = np.arange(1, len(real) + 1) / len(real)
-    sim_y = np.arange(1, len(sim) + 1) / len(sim)
-
-    plt.figure(figsize=(7, 5))
-    plt.step(real, real_y, where="post", label="Observed")
-    plt.step(sim, sim_y, where="post", label="Simulated")
-    plt.xlabel(xlab)
-    plt.ylabel("ECDF")
-    plt.title(title)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    plt.close()
-
-    print(f"Saved ECDF: {output_path}")
-
-
-def make_stage_ecdf_plots(obs_mix_result: dict, data_dir: Path) -> None:
-    """
-    ECDFs comparing:
-      - OBS_MIX BASELINE patients vs pre-PROSTAD observed data
-      - OBS_MIX PROSTAD patients vs PROSTAD observed data
-
-    Uses combined MRI -> clinic/decision stage for PROSTAD.
-    """
-    sim_stage = extract_stage_waits_with_pathway_type(obs_mix_result, "OBS_MIX")
-    sim_stage = add_combined_prostad_stage(sim_stage)
-
-    real_stage = load_real_stage_waits(data_dir)
-
-    subgroup_map = {
-        "BASELINE": "pre",
-        "PROSTAD": "pros",
-    }
-
-    for pathway_type, real_dataset in subgroup_map.items():
-        sim_subset = sim_stage[sim_stage["pathway_type"] == pathway_type]
-
-        for stage in sorted(sim_subset["stage"].dropna().unique()):
-            sim_series = sim_subset.loc[
-                sim_subset["stage"] == stage,
-                "wait_days",
-            ]
-
-            real_series = real_stage.loc[
-                (real_stage["source_dataset"] == real_dataset)
-                & (real_stage["stage"] == stage),
-                "wait_days",
-            ]
-
-            if len(sim_series.dropna()) == 0 or len(real_series.dropna()) == 0:
-                continue
-
-            title = (
-                f"{pathway_type} pathway in mixed simulation vs "
-                f"{real_dataset.upper()} data: {STAGE_LABELS.get(stage, stage)}"
-            )
-
-            output_path = (
-                OUTPUT_DIR
-                / f"ecdf_mixed_{pathway_type.lower()}_vs_{real_dataset}_{stage}.png"
-            )
-
-            plot_ecdf(
-                real=real_series,
-                sim=sim_series,
-                title=title,
-                xlab="Stage wait days",
-                output_path=output_path,
-            )
-
-def make_cumulative_ecdf_plots(obs_mix_result: dict, data_dir: Path) -> None:
-    """
-    ECDFs comparing referral-to-milestone times:
-      - OBS_MIX BASELINE patients vs pre-PROSTAD observed data
-      - OBS_MIX PROSTAD patients vs PROSTAD observed data
-    """
-    sim_cum = extract_cumulative_times_with_pathway_type(obs_mix_result, "OBS_MIX")
-
-    metric_series: dict[tuple[str, str], pd.Series] = {}
-
-    # -----------------------------
-    # BASELINE observed data
-    # -----------------------------
-    pre_ref = pd.read_csv(data_dir / "pre_ref_to_mri.csv").copy()
-    pre_ref["patient_id"] = pre_ref["Subject number"]
-    pre_ref["referral_date"] = parse_date_series(
-        pre_ref["Date of referral to pathway"], "uk"
-    )
-    pre_ref["mri_date"] = parse_date_series(pre_ref["Date of MRI"], "uk")
-
-    waits = (pre_ref["mri_date"] - pre_ref["referral_date"]).dt.days
-    metric_series[("BASELINE", "time_to_mri")] = waits[
-        (waits.notna()) & (waits >= 0)
-    ]
-
-    pre_mri_rep = pd.read_csv(data_dir / "pre_mri_to_mrirep.csv").copy()
-    pre_mri_rep["patient_id"] = pre_mri_rep["Subject number"]
-    pre_mri_rep["report_date"] = parse_date_series(
-        pre_mri_rep["Date MRI reported"], "uk"
-    )
-
-    merged = pre_ref[["patient_id", "referral_date"]].merge(
-        pre_mri_rep[["patient_id", "report_date"]],
-        on="patient_id",
-        how="inner",
-    )
-    waits = (merged["report_date"] - merged["referral_date"]).dt.days
-    metric_series[("BASELINE", "time_to_mri_reporting")] = waits[
-        (waits.notna()) & (waits >= 0)
-    ]
-
-    pre_rep_mdt = pd.read_csv(data_dir / "pre_mrirep_to_biopmdt.csv").copy()
-    pre_rep_mdt["patient_id"] = pre_rep_mdt["Subject number"]
-    pre_rep_mdt["mdt_date"] = parse_date_series(
-        pre_rep_mdt["Date of Prostate MRI MDT"], "uk"
-    )
-
-    merged = pre_ref[["patient_id", "referral_date"]].merge(
-        pre_rep_mdt[["patient_id", "mdt_date"]],
-        on="patient_id",
-        how="inner",
-    )
-    waits = (merged["mdt_date"] - merged["referral_date"]).dt.days
-    metric_series[("BASELINE", "time_to_biopsy_decision")] = waits[
-        (waits.notna()) & (waits >= 0)
-    ]
-
-    pre_biop = pd.read_csv(data_dir / "pre_biopmdt_to_biop.csv").copy()
-    pre_biop["patient_id"] = pre_biop["Subject number"]
-    pre_biop["biopsy_date"] = parse_date_series(pre_biop["Date of Biopsy"], "uk")
-
-    merged = pre_ref[["patient_id", "referral_date"]].merge(
-        pre_biop[["patient_id", "biopsy_date"]],
-        on="patient_id",
-        how="inner",
-    )
-    waits = (merged["biopsy_date"] - merged["referral_date"]).dt.days
-    metric_series[("BASELINE", "time_to_biopsy")] = waits[
-        (waits.notna()) & (waits >= 0)
-    ]
-
-    pre_pathrep = pd.read_csv(data_dir / "pre_biop_to_pathrep.csv").copy()
-    pre_pathrep["patient_id"] = pre_pathrep["Subject number"]
-    pre_pathrep["pathrep_date"] = parse_date_series(
-        pre_pathrep["Date of pathology report"], "uk"
-    )
-
-    merged = pre_ref[["patient_id", "referral_date"]].merge(
-        pre_pathrep[["patient_id", "pathrep_date"]],
-        on="patient_id",
-        how="inner",
-    )
-    waits = (merged["pathrep_date"] - merged["referral_date"]).dt.days
-    metric_series[("BASELINE", "time_to_diagnosis")] = waits[
-        (waits.notna()) & (waits >= 0)
-    ]
-
-    pre_path = pd.read_csv(data_dir / "pre_pathway.csv").copy()
-    pre_path["referral_date"] = parse_date_series(pre_path["referral_date"], "uk")
-    pre_path["outpatient_date"] = parse_date_series(pre_path["outpatient_date"], "uk")
-
-    waits = (pre_path["outpatient_date"] - pre_path["referral_date"]).dt.days
-    metric_series[("BASELINE", "time_to_outpatient_diagnosis")] = waits[
-        (waits.notna()) & (waits >= 0)
-    ]
-
-    # -----------------------------
-    # PROSTAD observed data
-    # -----------------------------
-    pros_ref = pd.read_csv(data_dir / "pros_ref_to_mri.csv").copy()
-    pros_ref["patient_id"] = pros_ref["Subject number"]
-    pros_ref["referral_date"] = parse_date_series(
-        pros_ref["Date of referral to pathway"], "us"
-    )
-    pros_ref["mri_date"] = parse_date_series(pros_ref["Date of MRI"], "us")
-
-    waits = (pros_ref["mri_date"] - pros_ref["referral_date"]).dt.days
-    metric_series[("PROSTAD", "time_to_mri")] = waits[
-        (waits.notna()) & (waits >= 0)
-    ]
-
-    pros_clinic = read_pros_mri_to_mriclin(data_dir).copy()
-    pros_clinic["clinic_date"] = parse_date_series(
-        pros_clinic["Date of clinic"], "us"
-    )
-
-    merged = pros_ref[["patient_id", "referral_date"]].merge(
-        pros_clinic[["patient_id", "clinic_date"]],
-        on="patient_id",
-        how="inner",
-    )
-    waits = (merged["clinic_date"] - merged["referral_date"]).dt.days
-    metric_series[("PROSTAD", "time_to_mri_reporting")] = waits[
-        (waits.notna()) & (waits >= 0)
-    ]
-
-    # PROSTAD biopsy decision is represented by clinic date.
-    metric_series[("PROSTAD", "time_to_biopsy_decision")] = metric_series[
-        ("PROSTAD", "time_to_mri_reporting")
-    ]
-
-    pros_biop = pd.read_csv(data_dir / "pros_mriclin_to_biop.csv").copy()
-    pros_biop["patient_id"] = pros_biop["Subject number"]
-    pros_biop["biopsy_date"] = parse_date_series(
-        pros_biop["Date of biopsy"], "us"
-    )
-
-    merged = pros_ref[["patient_id", "referral_date"]].merge(
-        pros_biop[["patient_id", "biopsy_date"]],
-        on="patient_id",
-        how="inner",
-    )
-    waits = (merged["biopsy_date"] - merged["referral_date"]).dt.days
-    metric_series[("PROSTAD", "time_to_biopsy")] = waits[
-        (waits.notna()) & (waits >= 0)
-    ]
-
-    pros_pathrep = pd.read_csv(data_dir / "pros_biop_to_pathrep.csv").copy()
-    pros_pathrep["patient_id"] = pros_pathrep["Subject number"]
-    pros_pathrep["pathrep_date"] = parse_date_series(
-        pros_pathrep["Date of pathology report"], "us"
-    )
-
-    merged = pros_ref[["patient_id", "referral_date"]].merge(
-        pros_pathrep[["patient_id", "pathrep_date"]],
-        on="patient_id",
-        how="inner",
-    )
-    waits = (merged["pathrep_date"] - merged["referral_date"]).dt.days
-    metric_series[("PROSTAD", "time_to_diagnosis")] = waits[
-        (waits.notna()) & (waits >= 0)
-    ]
-
-    pros_path = pd.read_csv(data_dir / "pros_pathway.csv").copy()
-    pros_path["referral_date"] = parse_date_series(
-        pros_path["referral_date"], "generic"
-    )
-    pros_path["outpatient_date"] = parse_date_series(
-        pros_path["outpatient_date"], "generic"
-    )
-
-    waits = (pros_path["outpatient_date"] - pros_path["referral_date"]).dt.days
-    metric_series[("PROSTAD", "time_to_outpatient_diagnosis")] = waits[
-        (waits.notna()) & (waits >= 0)
-    ]
-
-    # -----------------------------
-    # Plot
-    # -----------------------------
-    for pathway_type, real_dataset_label in [
-        ("BASELINE", "pre-PROSTAD"),
-        ("PROSTAD", "PROSTAD"),
-    ]:
-        sim_subset = sim_cum[sim_cum["pathway_type"] == pathway_type].copy()
-
-        for metric, label in CUMULATIVE_METRIC_LABELS.items():
-            sim_series = sim_subset.loc[
-                sim_subset["metric"] == metric,
-                "days_from_referral",
-            ]
-
-            real_series = metric_series.get(
-                (pathway_type, metric),
-                pd.Series(dtype=float),
-            )
-
-            if len(sim_series.dropna()) == 0 or len(real_series.dropna()) == 0:
-                continue
-
-            title = (
-                f"{pathway_type} pathway in mixed simulation vs "
-                f"{real_dataset_label} data: {label}"
-            )
-
-            output_path = (
-                OUTPUT_DIR
-                / f"ecdf_mixed_{pathway_type.lower()}_{metric}.png"
-            )
-
-            plot_ecdf(
-                real=real_series,
-                sim=sim_series,
-                title=title,
-                xlab="Days from referral",
-                output_path=output_path,
-            )
-
-
-def get_first_event_date(patient, event_name: str):
-    dates = [
-        event.get("date")
-        for event in patient.events
-        if event.get("event") == event_name and event.get("date") is not None
-    ]
-    return min(dates) if dates else None
-
-
-def extract_decision_to_biopsy_waits_from_sim(
-    obs_mix_result: dict,
-    pathway_type: str,
-) -> pd.Series:
-    waits = []
-
-    for patient in obs_mix_result.get("completed_patients_objects", []):
-        if patient.data.get("pathway_type") != pathway_type:
-            continue
-
-        decision_date = get_first_event_date(patient, "MDT_occured")
-        biopsy_date = get_first_event_date(patient, "biopsy_done")
-
-        if decision_date is None or biopsy_date is None:
-            continue
-
-        wait = (biopsy_date - decision_date).days
-
-        if wait >= 0:
-            waits.append(wait)
-
-    return pd.Series(waits, dtype=float)
-
-
-def make_decision_to_biopsy_ecdf(obs_mix_result: dict, data_dir: Path) -> None:
-    real_stage = load_real_stage_waits(data_dir)
-
-    comparisons = [
-        {
-            "pathway_type": "BASELINE",
-            "real_dataset": "pre",
-            "title": "BASELINE pathway in mixed simulation vs PRE data: MDT decision → Biopsy",
-            "output": "ecdf_mixed_baseline_decision_to_biopsy.png",
-        },
-        {
-            "pathway_type": "PROSTAD",
-            "real_dataset": "pros",
-            "title": "PROSTAD pathway in mixed simulation vs PROS data: Clinic/decision → Biopsy",
-            "output": "ecdf_mixed_prostad_decision_to_biopsy.png",
-        },
-    ]
-
-    for item in comparisons:
-        pathway_type = item["pathway_type"]
-        real_dataset = item["real_dataset"]
-
-        sim_series = extract_decision_to_biopsy_waits_from_sim(
-            obs_mix_result,
-            pathway_type,
         )
 
-        real_series = real_stage.loc[
-            (real_stage["source_dataset"] == real_dataset)
-            & (real_stage["stage"] == "biopmdt_to_biopsy"),
+    return pd.DataFrame(rows)
+
+
+def summarise_seed_level_results(seed_summary_df: pd.DataFrame) -> pd.DataFrame:
+    return (
+        seed_summary_df
+        .groupby(["level", "stage", "label"], as_index=False)
+        .agg(
+            n_runs=("seed", "nunique"),
+            n_sim_mean=("n_sim", "mean"),
+            n_sim_sd=("n_sim", "std"),
+            n_real=("n_real", "first"),
+            mean_sim_mean=("mean_sim", "mean"),
+            mean_sim_sd=("mean_sim", "std"),
+            mean_real=("mean_real", "first"),
+            median_sim_mean=("median_sim", "mean"),
+            median_sim_sd=("median_sim", "std"),
+            median_real=("median_real", "first"),
+            p90_sim_mean=("p90_sim", "mean"),
+            p90_sim_sd=("p90_sim", "std"),
+            p90_real=("p90_real", "first"),
+            mean_diff_mean=("mean_diff", "mean"),
+            mean_diff_sd=("mean_diff", "std"),
+            ks_stat_mean=("ks_stat", "mean"),
+            ks_stat_sd=("ks_stat", "std"),
+            ks_pvalue_median=("ks_pvalue", "median"),
+        )
+    )
+
+
+def add_seed_validation_rows(
+    seed: int,
+    pathway_label: str,
+    sim_stage_waits: pd.DataFrame,
+    sim_pathway: pd.DataFrame,
+    real_stage_waits: pd.DataFrame,
+    real_pathway: pd.DataFrame,
+) -> pd.DataFrame:
+    rows: list[dict] = []
+
+    for stage in STAGE_ORDER:
+        sim_series = sim_stage_waits.loc[
+            sim_stage_waits["stage"] == stage,
             "wait_days",
         ]
 
-        print(f"\n=== {pathway_type} DECISION → BIOPSY ECDF ===")
-        print("sim n:", len(sim_series.dropna()))
-        print("real n:", len(real_series.dropna()))
-        print("sim mean:", sim_series.mean())
-        print("real mean:", real_series.mean())
+        real_series = real_stage_waits.loc[
+            real_stage_waits["stage"] == stage,
+            "wait_days",
+        ]
 
-        output_path = OUTPUT_DIR / item["output"]
+        if len(sim_series.dropna()) == 0 or len(real_series.dropna()) == 0:
+            continue
+
+        rows.append(
+            {
+                "seed": seed,
+                "validation_group": pathway_label,
+                "level": "stage",
+                "stage": stage,
+                "label": STAGE_LABELS.get(stage, stage),
+                **compare_distributions(sim_series, real_series),
+            }
+        )
+
+    pathway_summary = compare_distributions(
+        sim_pathway["total_days"],
+        real_pathway["total_days"],
+    )
+
+    rows.append(
+        {
+            "seed": seed,
+            "validation_group": pathway_label,
+            "level": "full_pathway",
+            "stage": "full_pathway",
+            "label": "Full pathway",
+            **pathway_summary,
+        }
+    )
+
+    return pd.DataFrame(rows)
+
+
+def plot_ecdf(
+    sim_series: pd.Series,
+    real_series: pd.Series,
+    title: str,
+    out_path: Path,
+    x_label: str = "Days",
+    sim_label: str = "Simulated",
+    real_label: str = "Real",
+    sim_n_display: float | None = None,
+    real_n_display: float | None = None,
+) -> None:
+    sim_series = pd.to_numeric(sim_series, errors="coerce").dropna()
+    real_series = pd.to_numeric(real_series, errors="coerce").dropna()
+
+    if len(sim_series) == 0 or len(real_series) == 0:
+        print(f"Skipped ECDF: {title}")
+        return
+
+    sx, sy = ecdf(sim_series)
+    rx, ry = ecdf(real_series)
+
+    stats = compare_distributions(sim_series, real_series)
+
+    sim_n_text = f"{sim_n_display:.0f}" if sim_n_display is not None else str(stats["n_sim"])
+    real_n_text = f"{real_n_display:.0f}" if real_n_display is not None else str(stats["n_real"])
+
+    stats_text = (
+        f"n real = {real_n_text}, mean n sim = {sim_n_text}\n"
+        f"Mean diff = {stats['mean_diff']:.1f} days\n"
+        f"Median diff = {stats['median_diff']:.1f} days\n"
+        f"KS stat = {stats['ks_stat']:.3f}\n"
+        f"KS p = {stats['ks_pvalue']:.3f}"
+    )
+
+    plt.figure(figsize=(8, 5))
+    plt.step(rx, ry, where="post", label=f"{real_label} (n={real_n_text})")
+    plt.step(sx, sy, where="post", label=f"{sim_label} (mean n={sim_n_text})")
+    plt.xlabel(x_label)
+    plt.ylabel("ECDF")
+    plt.title(title)
+    plt.legend(loc="lower right")
+
+    plt.gcf().text(
+        0.70,
+        0.5,
+        stats_text,
+        fontsize=9,
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.9),
+    )
+
+    plt.subplots_adjust(right=0.7)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def plot_boxplot(
+    sim_series: pd.Series,
+    real_series: pd.Series,
+    title: str,
+    out_path: Path,
+    y_label: str = "Days",
+    sim_label: str = "Simulated",
+    real_label: str = "Real",
+) -> None:
+    sim_values = pd.to_numeric(sim_series, errors="coerce").dropna().to_numpy()
+    real_values = pd.to_numeric(real_series, errors="coerce").dropna().to_numpy()
+
+    if len(sim_values) == 0 or len(real_values) == 0:
+        print(f"Skipped boxplot: {title}")
+        return
+
+    stats = compare_distributions(pd.Series(sim_values), pd.Series(real_values))
+
+    plt.figure(figsize=(8, 5))
+    plt.boxplot(
+        [real_values, sim_values],
+        labels=[real_label, sim_label],
+        showfliers=True,
+        flierprops=dict(markersize=3),
+    )
+
+    plt.ylabel(y_label)
+    plt.title(
+        f"{title}\n"
+        f"KS={stats['ks_stat']:.3f}, p={stats['ks_pvalue']:.3f}, "
+        f"Mean diff={stats['mean_diff']:.1f} days"
+    )
+
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def make_pooled_validation_plots(
+    pooled_stage: pd.DataFrame,
+    pooled_pathway: pd.DataFrame,
+    real_stage_waits: pd.DataFrame,
+    real_pathway: pd.DataFrame,
+    group_name: str,
+    sim_label: str,
+    real_label: str,
+    filename_tag: str,
+) -> None:
+    for stage in STAGE_ORDER:
+        sim_series = pooled_stage.loc[
+            pooled_stage["stage"] == stage,
+            "wait_days",
+        ]
+
+        real_series = real_stage_waits.loc[
+            real_stage_waits["stage"] == stage,
+            "wait_days",
+        ]
+
+        if len(sim_series.dropna()) == 0 or len(real_series.dropna()) == 0:
+            continue
+
+        sim_n_mean = round(
+            pooled_stage[pooled_stage["stage"] == stage]
+            .groupby("seed")["patient_id"]
+            .nunique()
+            .mean()
+        )
+
+        real_n = real_series.dropna().shape[0]
 
         plot_ecdf(
-            real=real_series,
-            sim=sim_series,
-            title=item["title"],
-            xlab="Stage wait days",
-            output_path=output_path,
+            sim_series=sim_series,
+            real_series=real_series,
+            title=f"Pooled multi-seed {group_name} ECDF: {STAGE_LABELS.get(stage, stage)}",
+            out_path=OUTPUT_DIR / f"pooled_multiseed_ecdf_{filename_tag}_{stage}.png",
+            x_label="Stage wait days",
+            sim_label=sim_label,
+            real_label=real_label,
+            sim_n_display=sim_n_mean,
+            real_n_display=real_n,
         )
-def real_weekly_mri_counts_summary(data_dir: Path) -> pd.DataFrame:
-    df = pd.read_csv(data_dir / "pros_ref_to_mri.csv").copy()
-    df["mri_date"] = parse_date_series(df["Date of MRI"], "us")
-    df = df[df["mri_date"].notna()].copy()
 
-    df["week"] = df["mri_date"].dt.to_period("W").apply(lambda r: r.start_time)
+        plot_boxplot(
+            sim_series=sim_series,
+            real_series=real_series,
+            title=f"Pooled multi-seed {group_name} boxplot: {STAGE_LABELS.get(stage, stage)}",
+            out_path=OUTPUT_DIR / f"pooled_multiseed_boxplot_{filename_tag}_{stage}.png",
+            y_label="Stage wait days",
+            sim_label=sim_label,
+            real_label=real_label,
+        )
 
-    return (
-        df.groupby("week")
-        .size()
-        .reset_index(name="n_mri")
-        .sort_values("week")
-        .reset_index(drop=True)
+    sim_pathway_n_mean = round(
+        pooled_pathway
+        .groupby("seed")["patient_id"]
+        .nunique()
+        .mean()
     )
-def summarise_weekly_mri_distribution(weekly_df: pd.DataFrame) -> pd.DataFrame:
-    counts = weekly_df["n_mri"]
 
-    return pd.DataFrame({
-        "metric": [
-            "mean_per_week",
-            "median_per_week",
-            "min_per_week",
-            "max_per_week",
-            "weeks_lt_4",
-            "weeks_eq_4",
-            "weeks_gt_4",
-            "n_weeks",
-        ],
-        "value": [
-            float(counts.mean()),
-            float(counts.median()),
-            int(counts.min()),
-            int(counts.max()),
-            int((counts < 4).sum()),
-            int((counts == 4).sum()),
-            int((counts > 4).sum()),
-            int(len(counts)),
-        ],
-    })
+    real_pathway_n = real_pathway["total_days"].dropna().shape[0]
+
+    plot_ecdf(
+        sim_series=pooled_pathway["total_days"],
+        real_series=real_pathway["total_days"],
+        title=f"Pooled multi-seed {group_name} ECDF: Full pathway time",
+        out_path=OUTPUT_DIR / f"pooled_multiseed_ecdf_{filename_tag}_full_pathway.png",
+        x_label="Total pathway days",
+        sim_label=sim_label,
+        real_label=real_label,
+        sim_n_display=sim_pathway_n_mean,
+        real_n_display=real_pathway_n,
+    )
+
+    plot_boxplot(
+        sim_series=pooled_pathway["total_days"],
+        real_series=real_pathway["total_days"],
+        title=f"Pooled multi-seed {group_name} boxplot: Full pathway time",
+        out_path=OUTPUT_DIR / f"pooled_multiseed_boxplot_{filename_tag}_full_pathway.png",
+        y_label="Total pathway days",
+        sim_label=sim_label,
+        real_label=real_label,
+    )
 
 
 def main() -> None:
-    seed = 1234
-    start_date = date(2026, 1, 5)
-    n_days = 365
-    lam_per_workday = 1.7528735632183907
-
-    referral_schedule = generate_daily_referrals(
-        start_date=start_date,
-        n_days=n_days,
-        lam_per_workday=lam_per_workday,
-        seed=seed,
+    build_real_pathway_csvs(
+        pre_ref_file=str(DATA_DIR / "pre_ref_to_mri.csv"),
+        pre_outpat_file=str(DATA_DIR / "pre_treatmdt_to_outpat.csv"),
+        pros_ref_file=str(DATA_DIR / "pros_ref_to_mri.csv"),
+        pros_outpat_file=str(DATA_DIR / "pros_treatmdt_to_outpat.csv"),
+        out_pre_file=str(DATA_DIR / "pre_pathway.csv"),
+        out_pros_file=str(DATA_DIR / "pros_pathway.csv"),
     )
 
-    obs_mix_cfg = build_combined_config(
-        "OBS_MIX",
-        start_date=start_date,
-        n_days=n_days,
-        lam_per_workday=lam_per_workday,
-        seed=seed,
+    real_prostad_stage_waits = load_real_prostad_stage_waits(DATA_DIR)
+    real_prostad_pathway = load_real_prostad_full_pathway(DATA_DIR)
+
+    real_standard_stage_waits = load_real_baseline_stage_waits(DATA_DIR)
+    real_standard_pathway = load_real_baseline_full_pathway(DATA_DIR)
+
+    real_prostad_time_to_stage = load_real_prostad_time_to_stage(DATA_DIR)
+    real_standard_time_to_stage = load_real_baseline_time_to_stage(DATA_DIR)
+
+    all_stage_waits: list[pd.DataFrame] = []
+    all_pathways: list[pd.DataFrame] = []
+    all_time_to_stage: list[pd.DataFrame] = []
+
+    all_prostad_seed_summaries: list[pd.DataFrame] = []
+    all_standard_seed_summaries: list[pd.DataFrame] = []
+    all_table8_rows: list[pd.DataFrame] = []
+
+    for seed in SEEDS:
+        print(f"\nRunning seed {seed}...")
+
+        result = build_obs_mix_result(seed)
+
+        sim_stage_waits_all = extract_stage_waits_from_sim(result, seed)
+        sim_pathway_all = extract_full_pathway_from_sim(result, seed)
+        sim_time_to_stage = extract_time_to_stage_from_sim(result, seed)
+
+        all_stage_waits.append(sim_stage_waits_all)
+        all_pathways.append(sim_pathway_all)
+        all_time_to_stage.append(sim_time_to_stage)
+
+        sim_prostad_stage_waits = sim_stage_waits_all[
+            sim_stage_waits_all["pathway_type"] == "PROSTAD"
+        ].copy()
+
+        sim_prostad_pathway = sim_pathway_all[
+            sim_pathway_all["pathway_type"] == "PROSTAD"
+        ].copy()
+
+        sim_standard_stage_waits = sim_stage_waits_all[
+            sim_stage_waits_all["pathway_type"] == "BASELINE"
+        ].copy()
+
+        sim_standard_pathway = sim_pathway_all[
+            sim_pathway_all["pathway_type"] == "BASELINE"
+        ].copy()
+
+        prostad_seed_df = add_seed_validation_rows(
+            seed=seed,
+            pathway_label="PROSTAD",
+            sim_stage_waits=sim_prostad_stage_waits,
+            sim_pathway=sim_prostad_pathway,
+            real_stage_waits=real_prostad_stage_waits,
+            real_pathway=real_prostad_pathway,
+        )
+        all_prostad_seed_summaries.append(prostad_seed_df)
+
+        standard_seed_df = add_seed_validation_rows(
+            seed=seed,
+            pathway_label="STANDARD",
+            sim_stage_waits=sim_standard_stage_waits,
+            sim_pathway=sim_standard_pathway,
+            real_stage_waits=real_standard_stage_waits,
+            real_pathway=real_standard_pathway,
+        )
+        all_standard_seed_summaries.append(standard_seed_df)
+
+        table8_df = build_table8_mixed_sim_comparison(
+            sim_time_to_stage=sim_time_to_stage,
+            real_pros_time_to_stage=real_prostad_time_to_stage,
+            real_standard_time_to_stage=real_standard_time_to_stage,
+        )
+        table8_df["seed"] = seed
+        all_table8_rows.append(table8_df)
+
+    all_stage_waits_df = pd.concat(all_stage_waits, ignore_index=True)
+    all_pathway_df = pd.concat(all_pathways, ignore_index=True)
+    all_time_to_stage_df = pd.concat(all_time_to_stage, ignore_index=True)
+
+    all_stage_waits_df.to_csv(OUTPUT_DIR / "all_seed_stage_waits.csv", index=False)
+    all_pathway_df.to_csv(OUTPUT_DIR / "all_seed_full_pathways.csv", index=False)
+    all_time_to_stage_df.to_csv(OUTPUT_DIR / "all_seed_time_to_stage.csv", index=False)
+
+    prostad_seed_summary_df = pd.concat(all_prostad_seed_summaries, ignore_index=True)
+    prostad_seed_summary_df.to_csv(
+        OUTPUT_DIR / "prostad_validation_seed_level_summary.csv",
+        index=False,
     )
-    all_prostad_cfg = build_combined_config(
-        "ALL_PROSTAD",
-        start_date=start_date,
-        n_days=n_days,
-        lam_per_workday=lam_per_workday,
-        seed=seed,
+
+    prostad_across_seed_df = summarise_seed_level_results(prostad_seed_summary_df)
+    prostad_across_seed_df.to_csv(
+        OUTPUT_DIR / "prostad_validation_across_seed_summary.csv",
+        index=False,
     )
 
-    obs_mix_result = run_day_loop_combined_engine(
-        obs_mix_cfg,
-        daily_referrals_override=referral_schedule,
-    )
-    all_prostad_result = run_day_loop_combined_engine(
-        all_prostad_cfg,
-        daily_referrals_override=referral_schedule,
+    standard_seed_summary_df = pd.concat(all_standard_seed_summaries, ignore_index=True)
+    standard_seed_summary_df.to_csv(
+        OUTPUT_DIR / "standard_validation_seed_level_summary.csv",
+        index=False,
     )
 
-    subgroup_stage_val_df = validate_obs_mix_subgroups_stage_level(obs_mix_result, DATA_DIR)
-    subgroup_stage_val_df.to_csv(OUTPUT_DIR / "obs_mix_subgroup_stage_validation.csv", index=False)
+    standard_across_seed_df = summarise_seed_level_results(standard_seed_summary_df)
+    standard_across_seed_df.to_csv(
+        OUTPUT_DIR / "standard_validation_across_seed_summary.csv",
+        index=False,
+    )
 
-    subgroup_full_df = validate_obs_mix_subgroups_full_pathway(obs_mix_result, DATA_DIR)
-    subgroup_full_df.to_csv(OUTPUT_DIR / "obs_mix_subgroup_full_pathway_validation.csv", index=False)
+    print("\n=== ACROSS-SEED PROSTAD VALIDATION SUMMARY ===")
+    print(
+        prostad_across_seed_df[
+            [
+                "label",
+                "n_runs",
+                "n_sim_mean",
+                "n_sim_sd",
+                "n_real",
+                "mean_sim_mean",
+                "mean_sim_sd",
+                "mean_real",
+                "median_sim_mean",
+                "median_sim_sd",
+                "median_real",
+                "mean_diff_mean",
+                "mean_diff_sd",
+                "ks_stat_mean",
+                "ks_stat_sd",
+                "ks_pvalue_median",
+            ]
+        ].round(3).to_string(index=False)
+    )
 
-    table8_df = build_table8_like_comparison(obs_mix_result, DATA_DIR)
-    table8_df.to_csv(OUTPUT_DIR / "table8_like_prostad_comparison.csv", index=False)
+    print("\n=== ACROSS-SEED STANDARD VALIDATION SUMMARY ===")
+    print(
+        standard_across_seed_df[
+            [
+                "label",
+                "n_runs",
+                "n_sim_mean",
+                "n_sim_sd",
+                "n_real",
+                "mean_sim_mean",
+                "mean_sim_sd",
+                "mean_real",
+                "median_sim_mean",
+                "median_sim_sd",
+                "median_real",
+                "mean_diff_mean",
+                "mean_diff_sd",
+                "ks_stat_mean",
+                "ks_stat_sd",
+                "ks_pvalue_median",
+            ]
+        ].round(3).to_string(index=False)
+    )
 
-    make_stage_ecdf_plots(obs_mix_result, DATA_DIR)
-    make_cumulative_ecdf_plots(obs_mix_result, DATA_DIR)
+    table8_seed_df = pd.concat(all_table8_rows, ignore_index=True)
+    table8_seed_df.to_csv(
+        OUTPUT_DIR / "table8_mixed_sim_comparison_seed_level.csv",
+        index=False,
+    )
 
-    make_decision_to_biopsy_ecdf(obs_mix_result, DATA_DIR)
+    table8_across_seed_df = (
+        table8_seed_df
+        .groupby(["stage", "label"], as_index=False)
+        .agg(
+            n_runs=("seed", "nunique"),
+            real_prostad_n=("real_prostad_n", "first"),
+            real_prostad_mean=("real_prostad_mean", "first"),
+            real_prostad_median=("real_prostad_median", "first"),
+            real_standard_n=("real_standard_n", "first"),
+            real_standard_mean=("real_standard_mean", "first"),
+            real_standard_median=("real_standard_median", "first"),
+            real_difference_mean=("real_difference_mean", "first"),
+            real_difference_ci_low=("real_difference_ci_low", "first"),
+            real_difference_ci_high=("real_difference_ci_high", "first"),
+            real_difference_p_value=("real_difference_p_value", "first"),
+            sim_prostad_n_mean=("sim_prostad_n", "mean"),
+            sim_prostad_n_sd=("sim_prostad_n", "std"),
+            sim_prostad_mean_mean=("sim_prostad_mean", "mean"),
+            sim_prostad_mean_sd=("sim_prostad_mean", "std"),
+            sim_prostad_median_mean=("sim_prostad_median", "mean"),
+            sim_standard_n_mean=("sim_standard_n", "mean"),
+            sim_standard_n_sd=("sim_standard_n", "std"),
+            sim_standard_mean_mean=("sim_standard_mean", "mean"),
+            sim_standard_mean_sd=("sim_standard_mean", "std"),
+            sim_standard_median_mean=("sim_standard_median", "mean"),
+            sim_difference_mean_mean=("sim_difference_mean", "mean"),
+            sim_difference_mean_sd=("sim_difference_mean", "std"),
+            sim_difference_ci_low_mean=("sim_difference_ci_low", "mean"),
+            sim_difference_ci_high_mean=("sim_difference_ci_high", "mean"),
+            sim_difference_p_value_median=("sim_difference_p_value", "median"),
+        )
+    )
 
-    weekly_real_df = real_weekly_mri_counts_summary(DATA_DIR)
-    weekly_real_df.to_csv(OUTPUT_DIR / "real_prostad_weekly_mri_counts.csv", index=False)
+    table8_across_seed_df.to_csv(
+        OUTPUT_DIR / "table8_mixed_sim_comparison_across_seed.csv",
+        index=False,
+    )
 
-    weekly_real_summary_df = summarise_weekly_mri_distribution(weekly_real_df)
-    weekly_real_summary_df.to_csv(OUTPUT_DIR / "real_prostad_weekly_mri_summary.csv", index=False)
+    print("\n=== TABLE 8 ACROSS-SEED SUMMARY ===")
+    print(
+        table8_across_seed_df[
+            [
+                "label",
+                "n_runs",
+                "real_prostad_n",
+                "real_prostad_mean",
+                "real_standard_n",
+                "real_standard_mean",
+                "sim_prostad_n_mean",
+                "sim_prostad_n_sd",
+                "sim_prostad_mean_mean",
+                "sim_prostad_mean_sd",
+                "sim_standard_n_mean",
+                "sim_standard_n_sd",
+                "sim_standard_mean_mean",
+                "sim_standard_mean_sd",
+                "sim_difference_mean_mean",
+                "sim_difference_mean_sd",
+            ]
+        ].round(3).to_string(index=False)
+    )
 
-    print("\n=== TABLE 8-LIKE PROSTAD COMPARISON ===")
-    print(table8_df.round(3).to_string(index=False))
+    pooled_prostad_stage = all_stage_waits_df[
+        all_stage_waits_df["pathway_type"] == "PROSTAD"
+    ].copy()
 
-    print("\n=== MIXED SIMULATION SUBGROUP STAGE VALIDATION ===")
-    print(subgroup_stage_val_df.round(3).to_string(index=False))
+    pooled_prostad_pathway = all_pathway_df[
+        all_pathway_df["pathway_type"] == "PROSTAD"
+    ].copy()
 
-    print("\n=== MIXED SIMULATION SUBGROUP FULL PATHWAY VALIDATION ===")
-    print(subgroup_full_df.round(3).to_string(index=False))
+    pooled_standard_stage = all_stage_waits_df[
+        all_stage_waits_df["pathway_type"] == "BASELINE"
+    ].copy()
 
-    print("\n=== WEEKLY MRI SUMMARY (REAL PROSTAD DATA) ===")
-    print(weekly_real_summary_df.to_string(index=False))
+    pooled_standard_pathway = all_pathway_df[
+        all_pathway_df["pathway_type"] == "BASELINE"
+    ].copy()
+
+    make_pooled_validation_plots(
+        pooled_stage=pooled_prostad_stage,
+        pooled_pathway=pooled_prostad_pathway,
+        real_stage_waits=real_prostad_stage_waits,
+        real_pathway=real_prostad_pathway,
+        group_name="PROSTAD",
+        sim_label="Simulated PROSTAD",
+        real_label="Real PROSTAD",
+        filename_tag="prostad",
+    )
+
+    make_pooled_validation_plots(
+        pooled_stage=pooled_standard_stage,
+        pooled_pathway=pooled_standard_pathway,
+        real_stage_waits=real_standard_stage_waits,
+        real_pathway=real_standard_pathway,
+        group_name="standard",
+        sim_label="Simulated standard",
+        real_label="Real standard",
+        filename_tag="standard",
+    )
 
     print(f"\nSaved outputs to: {OUTPUT_DIR}")
 

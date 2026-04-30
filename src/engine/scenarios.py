@@ -12,9 +12,18 @@ from engine.pathway_definitions import STAGE_CONFIG, WAIT_MODE_DES, WAIT_MODE_MC
 
 DEFAULT_START_DATE = date(2026, 1, 5)
 DEFAULT_N_DAYS = 365
-DEFAULT_LAM_PER_WORKDAY = 1.7528735632183907
+DEFAULT_LAM_PER_WORKDAY = 1.1010830324909748
 DEFAULT_PROSTAD_OBSERVED_PROPORTION = 0.5098039215686274
-DEFAULT_PROSTAD_MRI_CAPACITY = {1: 4}
+DEFAULT_PROSTAD_MRI_CAPACITY = {1: 3}
+DEFAULT_BIOPSY_CAPACITY = {
+    0: 0,
+    1: 3,
+    2: 0,
+    3: 3,
+    4: 0,
+    5: 0,
+    6: 0,
+}
 
 
 def all_stages() -> list[str]:
@@ -34,12 +43,14 @@ class ScenarioTemplate:
     name: str
     p_prostad: float
     mri_capacity_by_weekday_prostad: dict[int, int] = field(default_factory=lambda: DEFAULT_PROSTAD_MRI_CAPACITY.copy())
+    biopsy_capacity_by_weekday: dict[int, int] = field(default_factory=lambda: DEFAULT_BIOPSY_CAPACITY.copy())
     baseline_wait_time_mode: dict[str, str] = field(default_factory=dict)
     prostad_wait_time_mode: dict[str, str] = field(default_factory=dict)
     baseline_stage_timing_policy: dict[str, str] = field(default_factory=dict)
     prostad_stage_timing_policy: dict[str, str] = field(default_factory=dict)
     baseline_fixed_wait_days_by_stage: dict[str, int] = field(default_factory=dict)
     prostad_fixed_wait_days_by_stage: dict[str, int] = field(default_factory=dict)
+    
 
 
 DEFAULT_BASELINE_WAIT_MODES = {stage: WAIT_MODE_MC for stage in all_stages()}
@@ -65,6 +76,12 @@ DEFAULT_PROSTAD_FIXED_WAITS = {
     "report_to_biopmdt": 0,
 }
 
+BASELINE_WITH_DES_BIOPSY_WAIT_MODES = DEFAULT_BASELINE_WAIT_MODES.copy()
+BASELINE_WITH_DES_BIOPSY_WAIT_MODES["biopmdt_to_biopsy"] = WAIT_MODE_DES
+
+PROSTAD_WITH_DES_BIOPSY_WAIT_MODES = DEFAULT_PROSTAD_WAIT_MODES.copy()
+PROSTAD_WITH_DES_BIOPSY_WAIT_MODES["biopmdt_to_biopsy"] = WAIT_MODE_DES
+
 
 SCENARIO_LIBRARY: dict[str, ScenarioTemplate] = {
     "ALL_BASELINE": ScenarioTemplate(
@@ -85,11 +102,24 @@ SCENARIO_LIBRARY: dict[str, ScenarioTemplate] = {
         prostad_stage_timing_policy=DEFAULT_PROSTAD_TIMING.copy(),
         prostad_fixed_wait_days_by_stage=DEFAULT_PROSTAD_FIXED_WAITS.copy(),
     ),
+    "OBS_MIX_DES_BIOPSY": ScenarioTemplate(
+        name="OBS_MIX_DES_BIOPSY",
+        p_prostad=DEFAULT_PROSTAD_OBSERVED_PROPORTION,
+        mri_capacity_by_weekday_prostad=DEFAULT_PROSTAD_MRI_CAPACITY.copy(),
+        biopsy_capacity_by_weekday=DEFAULT_BIOPSY_CAPACITY.copy(),
+        baseline_wait_time_mode=BASELINE_WITH_DES_BIOPSY_WAIT_MODES.copy(),
+        prostad_wait_time_mode=PROSTAD_WITH_DES_BIOPSY_WAIT_MODES.copy(),
+        baseline_stage_timing_policy=DEFAULT_BASELINE_TIMING.copy(),
+        prostad_stage_timing_policy=DEFAULT_PROSTAD_TIMING.copy(),
+        prostad_fixed_wait_days_by_stage=DEFAULT_PROSTAD_FIXED_WAITS.copy(),
+    ),
     "ALL_PROSTAD": ScenarioTemplate(
         name="ALL_PROSTAD",
         p_prostad=1.0,
-        baseline_wait_time_mode=DEFAULT_BASELINE_WAIT_MODES.copy(),
-        prostad_wait_time_mode=DEFAULT_PROSTAD_WAIT_MODES.copy(),
+        mri_capacity_by_weekday_prostad=DEFAULT_PROSTAD_MRI_CAPACITY.copy(),
+        biopsy_capacity_by_weekday=DEFAULT_BIOPSY_CAPACITY.copy(),
+        baseline_wait_time_mode=BASELINE_WITH_DES_BIOPSY_WAIT_MODES.copy(),
+        prostad_wait_time_mode=PROSTAD_WITH_DES_BIOPSY_WAIT_MODES.copy(),
         baseline_stage_timing_policy=DEFAULT_BASELINE_TIMING.copy(),
         prostad_stage_timing_policy=DEFAULT_PROSTAD_TIMING.copy(),
         prostad_fixed_wait_days_by_stage=DEFAULT_PROSTAD_FIXED_WAITS.copy(),
@@ -123,6 +153,7 @@ def build_combined_config(
         lam_per_workday=lam_per_workday,
         p_prostad=template.p_prostad,
         mri_capacity_by_weekday_prostad=template.mri_capacity_by_weekday_prostad.copy(),
+        biopsy_capacity_by_weekday=template.biopsy_capacity_by_weekday.copy(),
         seed=seed,
         baseline_wait_time_mode=template.baseline_wait_time_mode.copy(),
         prostad_wait_time_mode=template.prostad_wait_time_mode.copy(),

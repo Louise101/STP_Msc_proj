@@ -65,8 +65,11 @@ def initialize_pending_mc() -> dict[str, dict[date, list[DelayQueueItem]]]:
 
 
 """Create the delayed DES-arrival buffers used by queue-based stages."""
-def initialize_pending_des_arrivals() -> dict[str, dict[date, list[QueuePatient]]]:  
-    return {"MRI_PROSTAD": {}}
+def initialize_pending_des_arrivals() -> dict[str, dict[date, list[QueuePatient]]]:
+    return {
+        "MRI_PROSTAD": {},
+        "BIOPSY": {},
+    }
 
 """Create a stage activity container used for later analysis."""
 def initialize_stage_activity() -> dict[str, dict[str, dict[date, int]]]:
@@ -190,9 +193,13 @@ def get_rule_based_wait(stage_name: str) -> int:
 """Move DES arrivals scheduled for today into the live queue resource."""
 def release_due_des_arrivals_for_day(current_date: date, ctx: StageContext) -> None:
     for resource_name, arrivals_by_date in ctx.pending_des_arrivals.items():
-        due_today = arrivals_by_date.pop(current_date, [])
-        for queue_patient in due_today:
-            ctx.resources[resource_name].add_patient(queue_patient)
+        due_dates = [d for d in arrivals_by_date if d <= current_date]
+
+        for due_date in sorted(due_dates):
+            due_patients = arrivals_by_date.pop(due_date, [])
+
+            for queue_patient in due_patients:
+                ctx.resources[resource_name].add_patient(queue_patient)
 
 
 #def process_all_mc_due_today_until_stable(

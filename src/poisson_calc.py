@@ -23,7 +23,7 @@ def estimate_lambda_per_workday(df, date_column):
     # count referrals per date
     daily_counts = weekday_dates.value_counts()
 
-    # create full weekday range (includes zero-referral days)
+    # create full weekday range (includes zero-referral days) 
     all_weekdays = pd.date_range(
         start=weekday_dates.min(),
         end=weekday_dates.max(),

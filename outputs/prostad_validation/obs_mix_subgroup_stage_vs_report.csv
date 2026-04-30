@@ -1,9 +1,0 @@
-pathway_type,metric,sim_mean,observed_data_mean,report_value,sim_minus_observed,sim_minus_report,observed_minus_report
-BASELINE,ref_to_mri,24.36842105263158,25.0,25.0,-0.6315789473684212,-0.6315789473684212,0.0
-BASELINE,mri_to_report,6.777777777777778,,33.0,,-26.22222222222222,
-BASELINE,report_to_biopmdt,5.093567251461988,,38.0,,-32.90643274853801,
-BASELINE,biopmdt_to_biopsy,,,66.0,,,
-PROSTAD,ref_to_mri,25.12565445026178,13.125,13.0,12.00065445026178,12.12565445026178,0.125
-PROSTAD,mri_to_report,1.0,1.08843537414966,14.0,-0.08843537414965996,-13.0,-12.91156462585034
-PROSTAD,report_to_biopmdt,0.0,,14.0,,-14.0,
-PROSTAD,biopmdt_to_biopsy,,33.416666666666664,46.0,,,-12.583333333333336

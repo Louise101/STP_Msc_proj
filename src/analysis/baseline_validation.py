@@ -22,7 +22,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 START_DATE = date(2026, 1, 5)
 N_DAYS = 365
-LAM_PER_WORKDAY = 1.7528735632183907
+LAM_PER_WORKDAY = 0.586 # pre lamda from combined_ref_value_calc.py
 SEED = 1
 
 FULL_PATHWAY_EVENT = "Outpatient_appointment_occured"
@@ -147,24 +147,79 @@ def compare_distributions(sim_series: pd.Series, real_series: pd.Series) -> dict
 
 
 def plot_ecdf(sim_series: pd.Series, real_series: pd.Series, title: str, out_path: Path) -> None:
-    """Save one ECDF comparison plot."""
+    """Save one ECDF comparison plot with validation statistics."""
     sx, sy = ecdf(sim_series)
     rx, ry = ecdf(real_series)
 
+    stats = compare_distributions(sim_series, real_series)
+
+    stats_text = (
+        f"n real = {stats['n_real']}, n sim = {stats['n_sim']}\n"
+        f"Mean diff = {stats['mean_diff']:.1f} days\n"
+        f"Median diff = {stats['median_diff']:.1f} days\n"
+        f"KS stat = {stats['ks_stat']:.3f}\n"
+        f"KS p = {stats['ks_pvalue']:.3f}"
+    )
+
     plt.figure(figsize=(8, 5))
+
     if len(rx):
         plt.step(rx, ry, where="post", label="Real baseline")
+
     if len(sx):
         plt.step(sx, sy, where="post", label="Simulated baseline")
 
     plt.xlabel("Days")
     plt.ylabel("ECDF")
     plt.title(title)
-    plt.legend()
+    plt.legend(loc="lower right")
+
+    plt.text(
+        0.03,
+        0.97,
+        stats_text,
+        transform=plt.gca().transAxes,
+        fontsize=9,
+        verticalalignment="top",
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.85),
+    )
+
     plt.tight_layout()
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close()
 
+def plot_boxplot(sim_series: pd.Series, real_series: pd.Series, title: str, out_path: Path) -> None:
+    """Save one boxplot comparison plot."""
+    sim_values = sim_series.dropna().to_numpy()
+    real_values = real_series.dropna().to_numpy()
+
+    stats = compare_distributions(sim_series, real_series)
+
+    stats_text = (
+        f"n real = {stats['n_real']}, n sim = {stats['n_sim']}\n"
+        f"Mean diff = {stats['mean_diff']:.1f} days\n"
+        f"Median diff = {stats['median_diff']:.1f} days\n"
+        f"KS stat = {stats['ks_stat']:.3f}\n"
+        f"KS p = {stats['ks_pvalue']:.3f}"
+    )
+
+    plt.figure(figsize=(7, 5))
+
+    plt.boxplot(
+        [real_values, sim_values],
+        labels=["Real baseline", "Simulated baseline"],
+        showfliers=True,
+    )
+
+    plt.ylabel("Days")
+    plt.title(
+              f"{title}\nKS={stats['ks_stat']:.3f}, p={stats['ks_pvalue']:.3f}),"
+              f"MeanDiff.={stats['mean_diff']: .1f} days")
+    
+
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close()
 
 def main() -> None:
     # ------------------------------------------------------------------
@@ -223,6 +278,13 @@ def main() -> None:
             out_path=OUTPUT_DIR / f"ecdf_{stage}.png",
         )
 
+        plot_boxplot(
+            sim_series=sim_series,
+            real_series=real_series,
+            title=f"Baseline validation boxplot: {STAGE_LABELS.get(stage, stage)}",
+            out_path=OUTPUT_DIR / f"boxplot_{stage}.png",
+        )
+
     stage_summary_df = pd.DataFrame(stage_rows)
     stage_summary_df.to_csv(OUTPUT_DIR / "baseline_stage_validation_summary.csv", index=False)
 
@@ -247,6 +309,13 @@ def main() -> None:
         real_series=real_pre_path["total_days"],
         title="Baseline validation ECDF: Full pathway time",
         out_path=OUTPUT_DIR / "ecdf_full_pathway.png",
+    )
+
+    plot_boxplot(
+        sim_series=sim_pathway["total_days"],
+        real_series=real_pre_path["total_days"],
+        title="Baseline validation boxplot: Full pathway time",
+        out_path=OUTPUT_DIR / "boxplot_full_pathway.png",
     )
 
     # ------------------------------------------------------------------

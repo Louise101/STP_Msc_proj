@@ -103,7 +103,11 @@ def run_named_scenarios(
 
 if __name__ == "__main__":
     outputs = run_named_scenarios(
-        ["ALL_BASELINE", "OBS_MIX", "ALL_PROSTAD"],
+        ["ALL_BASELINE", 
+         "OBS_MIX",
+         "OBS_MIX_DES_BIOPSY", 
+         "ALL_PROSTAD",
+         ],
         seeds=list(range(1, 6)),
     )
     print("Saved refactored scenario outputs to:", OUTPUT_DIR)

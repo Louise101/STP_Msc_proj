@@ -41,6 +41,7 @@ class CombinedEngineConfig:
     lam_per_workday: float
     p_prostad: float
     mri_capacity_by_weekday_prostad: Dict[int, int]
+    biopsy_capacity_by_weekday: Dict[int, int] | None = None
 
     seed: int = 1234
 
@@ -332,6 +333,17 @@ def run_day_loop_combined_engine(
 
     mri_resource_prostad = QueueResource("MRI_PROSTAD", cfg.mri_capacity_by_weekday_prostad)
 
+    biopsy_capacity = cfg.biopsy_capacity_by_weekday or {
+        0: 0,
+        1: 0,
+        2: 0,
+        3: 0,
+        4: 0,
+        5: 0,
+        6: 0,
+    }
+    biopsy_resource = QueueResource("BIOPSY", biopsy_capacity)
+
     #pending_mc = initialize_pending_mc()
    # pending_des_arrivals = initialize_pending_des_arrivals()
    # stage_activity = initialize_stage_activity()
@@ -342,7 +354,10 @@ def run_day_loop_combined_engine(
         branching=branching,
         wait_time_mode={},
         pending_mc=initialize_pending_mc(),
-        resources={"MRI_PROSTAD": mri_resource_prostad},
+        resources={
+            "MRI_PROSTAD": mri_resource_prostad,
+            "BIOPSY": biopsy_resource,
+            },
         base_seed=cfg.seed,
         stage_timing_policy={},
         fixed_wait_days_by_stage={},
@@ -380,8 +395,48 @@ def run_day_loop_combined_engine(
             enter_stage_for_patient(patient, "ref_to_mri", ctx, cfg)
 
         release_due_des_arrivals_for_day(current_date, ctx)
-        process_des_resource_for_day_combined("MRI_PROSTAD", current_date, ctx, cfg, completed_patients)
-        process_all_mc_due_today_until_stable_combined(current_date, ctx, cfg, completed_patients)
+
+        process_des_resource_for_day_combined(
+            "MRI_PROSTAD",
+        current_date,
+            ctx,
+            cfg,
+            completed_patients,
+        )
+
+        process_des_resource_for_day_combined(
+            "BIOPSY",
+            current_date,
+            ctx,
+            cfg,
+            completed_patients,
+        )
+
+        process_all_mc_due_today_until_stable_combined(
+            current_date,
+            ctx,
+            cfg,
+            completed_patients,
+        )
+
+        # Important: MC completions may have created new DES arrivals for today
+        release_due_des_arrivals_for_day(current_date, ctx)
+
+        process_des_resource_for_day_combined(
+            "BIOPSY",
+            current_date,
+            ctx,
+            cfg,
+            completed_patients,
+        )
+
+        process_all_mc_due_today_until_stable_combined(
+            current_date,
+            ctx,
+            cfg,
+            completed_patients,
+        )
+
         snapshot_stage_occupancy(current_date, ctx)
 
         current_date += timedelta(days=1)
@@ -403,9 +458,11 @@ def run_day_loop_combined_engine(
         "p_prostad": cfg.p_prostad,
         "capacity_by_resource": {
             "MRI_PROSTAD": cfg.mri_capacity_by_weekday_prostad,
+            "BIOPSY": biopsy_capacity,
         },
         "final_queue_length_by_resource": {
             "MRI_PROSTAD": mri_resource_prostad.queue_length(),
+            "BIOPSY": biopsy_resource.queue_length(),
         },
     }
 
@@ -427,6 +484,11 @@ def run_day_loop_combined_engine(
                 "daily_started": mri_resource_prostad.daily_started,
                 "daily_queue_len": mri_resource_prostad.daily_queue_len,
                 "daily_waits": mri_resource_prostad.daily_waits,
+            },
+            "BIOPSY": {
+                "daily_started": biopsy_resource.daily_started,
+                "daily_queue_len": biopsy_resource.daily_queue_len,
+                "daily_waits": biopsy_resource.daily_waits,
             },
         },
         "stage_activity": ctx.stage_activity,
