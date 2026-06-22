@@ -16,7 +16,11 @@ from analysis.validation import build_real_pathway_csvs, load_real_pathway_data
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
-OUTPUT_DIR = BASE_DIR / "outputs" / "prostad_validation_ecdf_mri3"
+
+MRI_SLOTS_PER_WEEK = 3  # change to 4 for original intended PROSTAD capacity
+SCENARIO_NAME = f"OBS_MIX_MRI{MRI_SLOTS_PER_WEEK}"
+
+OUTPUT_DIR = BASE_DIR / "outputs" / f"prostad_validation_mri{MRI_SLOTS_PER_WEEK}"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 START_DATE = date(2026, 1, 5)
@@ -86,7 +90,6 @@ def parse_date_series(series: pd.Series, style: str = "generic") -> pd.Series:
 
     return pd.to_datetime(s, errors="coerce")
 
-
 def build_obs_mix_result(seed: int) -> dict:
     referral_schedule = generate_daily_referrals(
         start_date=START_DATE,
@@ -101,13 +104,16 @@ def build_obs_mix_result(seed: int) -> dict:
         n_days=N_DAYS,
         lam_per_workday=LAM_PER_WORKDAY,
         seed=seed,
+        overrides={
+            "mri_capacity_by_weekday_prostad": {1: MRI_SLOTS_PER_WEEK},
+            "scenario_name": SCENARIO_NAME,
+        },
     )
 
     return run_day_loop_combined_engine(
         cfg,
         daily_referrals_override=referral_schedule,
     )
-
 
 def extract_stage_waits_from_sim(result: dict, seed: int) -> pd.DataFrame:
     rows: list[dict] = []
@@ -822,6 +828,203 @@ def make_pooled_validation_plots(
         real_label=real_label,
     )
 
+def plot_poster_mixed_ecdf(
+    real_prostad: pd.Series,
+    sim_prostad: pd.Series,
+    real_standard: pd.Series,
+    sim_standard: pd.Series,
+    out_path: Path,
+    x_label: str = "Days from referral to patient informed",
+) -> None:
+    real_prostad = pd.to_numeric(real_prostad, errors="coerce").dropna()
+    sim_prostad = pd.to_numeric(sim_prostad, errors="coerce").dropna()
+    real_standard = pd.to_numeric(real_standard, errors="coerce").dropna()
+    sim_standard = pd.to_numeric(sim_standard, errors="coerce").dropna()
+
+    line_specs = [
+        (real_prostad, "PROSTAD observed", "dashed",  "#1F4E79"),
+        (sim_prostad, "PROSTAD simulated", "-", "#1F4E79"),
+        (real_standard, "Standard observed", "dashed",  "#5FB3B3",),
+        (sim_standard, "Standard simulated", "-", "#5FB3B3",),
+
+        # "#E6F4F3",  # very light teal (background match)
+       # "#A8D5D2",  # light teal
+       # "#5FB3B3",  # mid teal
+       # "#2F7F8F",  # teal-blue
+       # "#1F4E79",  # dark blue
+    ]
+
+    plt.figure(figsize=(9, 6))
+
+    for values, label, linestyle, color in line_specs:
+        x, y = ecdf(values)
+        plt.step(
+            x,
+            y,
+            where="post",
+            label=label,
+            linewidth=3,
+            linestyle=linestyle,
+            color=color,
+        )
+
+   # plt.xlabel(x_label, fontsize=18, labelpad=10)
+    #plt.ylabel("Cumulative proportion of patients", fontsize=18, labelpad=10)
+    plt.xticks(fontsize=24)
+    plt.yticks(fontsize=24)
+
+    plt.legend(fontsize=24, frameon=False, loc="lower right")
+    plt.grid(True, alpha=0.25)
+    plt.tight_layout()
+
+    plt.savefig(out_path, format="svg", bbox_inches="tight")
+    plt.close()
+
+def plot_combined_prostad_ecdfs(
+    pooled_stage: pd.DataFrame,
+    pooled_pathway: pd.DataFrame,
+    real_stage_waits: pd.DataFrame,
+    real_pathway: pd.DataFrame,
+    out_path: Path,
+) -> None:
+    panels = [
+    "ref_to_mri",
+    #"report_to_biopmdt",
+    "biopmdt_to_biopsy",
+    "biopsy_to_pathrep",
+    "pathrep_to_treatmdt",
+    "treatmdt_to_outpat",
+    "full_pathway",
+]
+
+    fig, axes = plt.subplots(3, 2, figsize=(9, 9), sharey=True)
+    axes = axes.flatten()
+
+    for ax in axes[len(panels):]:
+        ax.axis("off")
+
+    for ax, item in zip(axes, panels):
+        if item == "full_pathway":
+            sim_series = pooled_pathway["total_days"]
+            real_series = real_pathway["total_days"]
+            title = "Total pathway time"
+            xlabel = "Wait time (days)"
+        else:
+            sim_series = pooled_stage.loc[pooled_stage["stage"] == item, "wait_days"]
+            real_series = real_stage_waits.loc[real_stage_waits["stage"] == item, "wait_days"]
+            title = STAGE_LABELS.get(item, item)
+            xlabel = "Wait time (days)"
+
+        sim_series = pd.to_numeric(sim_series, errors="coerce").dropna()
+        real_series = pd.to_numeric(real_series, errors="coerce").dropna()
+
+        if len(sim_series) == 0 or len(real_series) == 0:
+            ax.axis("off")
+            continue
+
+        sx, sy = ecdf(sim_series)
+        rx, ry = ecdf(real_series)
+
+        stats = compare_distributions(sim_series, real_series)
+
+        ax.step(rx, ry, where="post", label="Observed", linewidth=2)
+        ax.step(sx, sy, where="post", label="Simulated", linewidth=2)
+        ax.set_title(title, fontsize=18)
+        ax.set_xlabel(xlabel,fontsize=15)
+        ax.set_ylabel("ECDF",fontsize=15)
+        ax.grid(True, alpha=0.25)
+
+        ax.text(
+            0.03,
+            0.95,
+            f"KS={stats['ks_stat']:.2f}\np={stats['ks_pvalue']:.3f}",
+            transform=ax.transAxes,
+            va="top",
+            ha="left",
+            fontsize=12,
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.9),
+        )
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False, fontsize=18)
+
+    #fig.suptitle(
+     #   f"PROSTAD validation: observed vs simulated, MRI slots/week = {MRI_SLOTS_PER_WEEK}",
+      #  y=0.995,
+       # fontsize=16,
+    #)
+
+
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.savefig(out_path, dpi=300, bbox_inches="tight", pad_inches=0.1)
+    plt.close()
+
+def build_prostad_evaluation_style_table(
+    real_standard_time_to_stage: pd.DataFrame,
+    real_prostad_time_to_stage: pd.DataFrame,
+    sim_time_to_stage: pd.DataFrame,
+) -> pd.DataFrame:
+    table_stages = [
+        "ref_to_mri",
+        "mri_to_report",
+        "report_to_biopmdt",
+        "biopmdt_to_biopsy",
+        "biopsy_to_pathrep",
+        "treatmdt_to_outpat",
+    ]
+
+    table_labels = {
+        "ref_to_mri": "Time to MRI",
+        "mri_to_report": "Time to MRI reporting",
+        "report_to_biopmdt": "Time to biopsy decision",
+        "biopmdt_to_biopsy": "Time to biopsy",
+        "biopsy_to_pathrep": "Time to diagnosis",
+        "treatmdt_to_outpat": "Time to outpatient appointment",
+    }
+
+    rows = []
+
+    for stage in table_stages:
+        real_standard = real_standard_time_to_stage.loc[
+            real_standard_time_to_stage["stage"] == stage,
+            "time_to_stage_days",
+        ].dropna()
+
+        real_prostad = real_prostad_time_to_stage.loc[
+            real_prostad_time_to_stage["stage"] == stage,
+            "time_to_stage_days",
+        ].dropna()
+
+        sim_standard = sim_time_to_stage.loc[
+            (sim_time_to_stage["pathway_type"] == "BASELINE")
+            & (sim_time_to_stage["stage"] == stage),
+            "time_to_stage_days",
+        ].dropna()
+
+        sim_prostad = sim_time_to_stage.loc[
+            (sim_time_to_stage["pathway_type"] == "PROSTAD")
+            & (sim_time_to_stage["stage"] == stage),
+            "time_to_stage_days",
+        ].dropna()
+
+        rows.append(
+            {
+                "stage": stage,
+                "label": table_labels[stage],
+                "real_standard_median": real_standard.median(),
+                "real_prostad_median": real_prostad.median(),
+                "real_reduction_days": real_standard.median() - real_prostad.median(),
+                "sim_standard_median": sim_standard.median(),
+                f"sim_prostad_median_mri{MRI_SLOTS_PER_WEEK}": sim_prostad.median(),
+                f"sim_reduction_days_mri{MRI_SLOTS_PER_WEEK}": sim_standard.median() - sim_prostad.median(),
+                "real_standard_n": len(real_standard),
+                "real_prostad_n": len(real_prostad),
+                "sim_standard_n": len(sim_standard),
+                f"sim_prostad_n_mri{MRI_SLOTS_PER_WEEK}": len(sim_prostad),
+            }
+        )
+
+    return pd.DataFrame(rows)
 
 def main() -> None:
     build_real_pathway_csvs(
@@ -1071,6 +1274,28 @@ def main() -> None:
         all_pathway_df["pathway_type"] == "BASELINE"
     ].copy()
 
+    plot_combined_prostad_ecdfs(
+        pooled_stage=pooled_prostad_stage,
+        pooled_pathway=pooled_prostad_pathway,
+        real_stage_waits=real_prostad_stage_waits,
+        real_pathway=real_prostad_pathway,
+        out_path=OUTPUT_DIR / f"combined_prostad_ecdfs_mri{MRI_SLOTS_PER_WEEK}.png",
+    )
+
+    prostad_eval_table = build_prostad_evaluation_style_table(
+        real_standard_time_to_stage=real_standard_time_to_stage,
+        real_prostad_time_to_stage=real_prostad_time_to_stage,
+        sim_time_to_stage=all_time_to_stage_df,
+    )
+
+    prostad_eval_table.to_csv(
+        OUTPUT_DIR / f"prostad_evaluation_style_table_mri{MRI_SLOTS_PER_WEEK}.csv",
+        index=False,
+    )
+
+    print(f"\n=== PROSTAD EVALUATION STYLE TABLE: MRI {MRI_SLOTS_PER_WEEK} slots/week ===")
+    print(prostad_eval_table.round(2).to_string(index=False))
+
     make_pooled_validation_plots(
         pooled_stage=pooled_prostad_stage,
         pooled_pathway=pooled_prostad_pathway,
@@ -1094,6 +1319,14 @@ def main() -> None:
     )
 
     print(f"\nSaved outputs to: {OUTPUT_DIR}")
+
+    plot_poster_mixed_ecdf(
+        real_prostad=real_prostad_pathway["total_days"],
+        sim_prostad=pooled_prostad_pathway["total_days"],
+        real_standard=real_standard_pathway["total_days"],
+        sim_standard=pooled_standard_pathway["total_days"],
+        out_path=OUTPUT_DIR / "poster_mixed_sim_ecdf_full_pathway.svg",
+    )
 
 
 if __name__ == "__main__":

@@ -366,3 +366,99 @@ def test_completed_patients_have_valid_exit_reasons():
 
     for patient in result["completed_patients_objects"]:
         assert patient.exit_reason in valid_exit_reasons
+
+def test_patient_conservation_in_combined_engine():
+    cfg = make_config(seed=123, n_days=10, p_prostad=0.5)
+    daily_override = {
+        cfg.start_date + pd.Timedelta(days=i): 1 if i < 5 else 0
+        for i in range(10)
+    }
+    daily_override = {
+        k.date() if hasattr(k, "date") else k: v
+        for k, v in daily_override.items()
+    }
+
+    result = run_day_loop_combined_engine(
+        cfg,
+        daily_referrals_override=daily_override,
+    )
+
+    total_referrals = sum(daily_override.values())
+    all_patients = result["all_patients_objects"]
+    completed_patients = result["completed_patients_objects"]
+
+    assert len(all_patients) == total_referrals
+    assert len({p.patient_id for p in all_patients}) == total_referrals
+
+    completed_ids = {p.patient_id for p in completed_patients}
+    all_ids = {p.patient_id for p in all_patients}
+
+    assert completed_ids.issubset(all_ids)
+
+    incomplete_patients = [p for p in all_patients if not p.is_complete]
+    assert len(all_patients) == len(completed_patients) + len(incomplete_patients)
+
+def test_completed_patients_have_single_terminal_event():
+    cfg = make_config(seed=123, n_days=10, p_prostad=0.5)
+    daily_override = {
+        cfg.start_date + pd.Timedelta(days=i): 1 if i < 5 else 0
+        for i in range(10)
+    }
+    daily_override = {
+        k.date() if hasattr(k, "date") else k: v
+        for k, v in daily_override.items()
+    }
+
+    result = run_day_loop_combined_engine(
+        cfg,
+        daily_referrals_override=daily_override,
+    )
+
+    terminal_events = {
+        "mdt_decision",
+        "Path_report_outcome",
+        "Outpatient_appointment_occured",
+    }
+
+    for patient in result["completed_patients_objects"]:
+        names = [event["event"] for event in patient.events]
+        found = [event for event in names if event in terminal_events]
+
+        assert len(found) == 1
+
+def test_combined_engine_event_log_has_no_negative_waits():
+    cfg = make_config(seed=123, n_days=10, p_prostad=0.5)
+    daily_override = {
+        cfg.start_date + pd.Timedelta(days=i): 1 if i < 5 else 0
+        for i in range(10)
+    }
+    daily_override = {
+        k.date() if hasattr(k, "date") else k: v
+        for k, v in daily_override.items()
+    }
+
+    result = run_day_loop_combined_engine(
+        cfg,
+        daily_referrals_override=daily_override,
+    )
+
+    event_log = result["event_log"]
+
+    if "wait_days" in event_log.columns:
+        waits = event_log["wait_days"].dropna()
+        assert (waits >= 0).all()
+
+def test_sample_patient_pathway_matches_prostad_probability_approximately():
+    patients = [
+        create_new_combined_patient(i, date(2026, 1, 5))
+        for i in range(1, 5001)
+    ]
+
+    routes = [
+        sample_patient_pathway(patient, base_seed=123, p_prostad=0.35)
+        for patient in patients
+    ]
+
+    observed = routes.count("PROSTAD") / len(routes)
+
+    assert observed == pytest.approx(0.35, abs=0.03)

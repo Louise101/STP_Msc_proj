@@ -1,0 +1,7 @@
+stage,label,real_standard_median,real_prostad_median,real_reduction_days,sim_standard_median,sim_prostad_median_mri3,sim_reduction_days_mri3,real_standard_n,real_prostad_n,sim_standard_n,sim_prostad_n_mri3
+ref_to_mri,Time to MRI,22.0,13.0,9.0,22.0,8.0,14.0,150,152,4061,4062
+mri_to_report,Time to MRI reporting,32.0,14.0,18.0,29.0,9.0,20.0,150,146,3973,4062
+report_to_biopmdt,Time to biopsy decision,36.0,14.0,22.0,34.0,9.0,25.0,147,146,3926,4062
+biopmdt_to_biopsy,Time to biopsy,62.0,38.5,23.5,61.0,35.0,26.0,69,72,2180,2231
+biopsy_to_pathrep,Time to diagnosis,71.5,49.0,22.5,70.0,44.0,26.0,64,71,2120,2182
+treatmdt_to_outpat,Time to outpatient appointment,92.0,64.5,27.5,91.0,65.0,26.0,49,50,1625,1662

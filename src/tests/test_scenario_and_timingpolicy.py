@@ -352,3 +352,39 @@ def test_prostad_fixed_rule_chain_same_day(monkeypatch, ctx):
     assert "MDT_occured" in event_names
     assert patient.is_complete is True
 
+def test_deterministic_prostad_fixed_timing_dates(monkeypatch, ctx):
+    ctx.wait_time_mode = {
+        stage: WAIT_MODE_MC for stage in stage_engine2.STAGE_CONFIG
+    }
+
+    ctx.stage_timing_policy = {
+        "mri_to_report": "FIXED",
+        "report_to_biopmdt": "FIXED",
+    }
+
+    ctx.fixed_wait_days_by_stage = {
+        "mri_to_report": 1,
+        "report_to_biopmdt": 0,
+    }
+
+    monkeypatch.setattr(stage_engine2, "sample_mdt_decision", lambda ctx: 0)
+
+    patient = stage_engine2.create_new_patient(99, date(2026, 1, 5))
+    patient.current_date = date(2026, 1, 10)
+
+    stage_engine2.enter_wait_stage(patient, "mri_to_report", ctx)
+
+    completed = []
+    stage_engine2.process_all_mc_due_today_until_stable(
+        date(2026, 1, 11),
+        ctx,
+        completed,
+    )
+
+    events = {e["event"]: e for e in patient.events}
+
+    assert events["mri_report_ready"]["date"] == date(2026, 1, 11)
+    assert events["MDT_occured"]["date"] == date(2026, 1, 11)
+    assert events["mdt_decision"]["date"] == date(2026, 1, 11)
+    assert patient.is_complete is True
+

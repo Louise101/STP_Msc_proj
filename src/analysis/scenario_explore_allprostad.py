@@ -9,6 +9,7 @@ import pandas as pd
 
 from engine.combined_engine import run_day_loop_combined_engine
 from engine.scenarios import build_combined_config, generate_daily_referrals
+from matplotlib.colors import LinearSegmentedColormap
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -25,8 +26,11 @@ SCENARIO_NAME = "ALL_PROSTAD"
 
 OUTPATIENT_EVENT = "Outpatient_appointment_occured"
 
-MRI_CAPACITIES = [2, 3, 4, 5, 6, 7, 8]
-BIOPSY_CAPACITIES = [1, 2, 3, 4, 5, 6]
+#MRI_CAPACITIES = [2, 3, 4, 5, 6, 7, 8]
+#BIOPSY_CAPACITIES = [1, 2, 3, 4, 5]
+
+MRI_CAPACITIES = [4, 5, 6]
+BIOPSY_CAPACITIES = [2, 3,4]
 
 
 def make_referral_schedule(seed: int) -> dict:
@@ -48,11 +52,11 @@ def apply_capacity_overrides(cfg, mri_capacity: int, biopsy_capacity: int):
     }
 
     cfg.biopsy_capacity_by_weekday = {
-        0: biopsy_capacity,
+        0: 0,
         1: 0,
-        2: 0,
+        2:0, 
         3: 0,
-        4: 0,
+        4: biopsy_capacity,
     }
 
     return cfg
@@ -188,7 +192,7 @@ def plot_heatmap(
     summary_df: pd.DataFrame,
     value_col: str,
     colourbar_label: str,
-    title: str,
+    title: str,  # kept for compatibility, but not used
     filename: str,
 ) -> None:
     heatmap_df = summary_df.pivot(
@@ -197,39 +201,95 @@ def plot_heatmap(
         values=value_col,
     )
 
-    plt.figure(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(10, 6))
 
-    im = plt.imshow(
+    custom_cmap = LinearSegmentedColormap.from_list(
+    "poster_teal_blue",
+    [
+        "#E6F4F3",  # very light teal (background match)
+        "#A8D5D2",  # light teal
+        "#5FB3B3",  # mid teal
+        "#2F7F8F",  # teal-blue
+        "#1F4E79",  # dark blue
+    ],
+)
+
+    im = ax.imshow(
         heatmap_df.values,
         aspect="auto",
         origin="lower",
+        cmap=custom_cmap
     )
 
-    plt.colorbar(im, label=colourbar_label)
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.set_label(colourbar_label, fontsize=17, labelpad=12)
+    cbar.ax.tick_params(labelsize=24)
 
-    plt.xticks(
-        ticks=np.arange(len(heatmap_df.columns)),
-        labels=heatmap_df.columns,
-    )
+    ax.set_xticks(np.arange(len(heatmap_df.columns)))
+    ax.set_xticklabels(heatmap_df.columns, fontsize=24)
 
-    plt.yticks(
-        ticks=np.arange(len(heatmap_df.index)),
-        labels=heatmap_df.index,
-    )
+    ax.set_yticks(np.arange(len(heatmap_df.index)))
+    ax.set_yticklabels(heatmap_df.index, fontsize=24)
 
-    plt.xlabel("MRI capacity")
-    plt.ylabel("Biopsy capacity")
-    plt.title(title)
+    ax.set_xlabel("MRI capacity (per week)", fontsize=24, labelpad=10)
+    ax.set_ylabel("Biopsy capacity (per week)", fontsize=24, labelpad=10)
+
+    # No title — add separately on poster
+
+    values = heatmap_df.values
+    threshold = np.nanmax(values) * 0.55
 
     for y in range(len(heatmap_df.index)):
         for x in range(len(heatmap_df.columns)):
-            value = heatmap_df.values[y, x]
+            value = values[y, x]
             if pd.notna(value):
-                plt.text(x, y, f"{value:.1f}", ha="center", va="center")
+                text_colour = "white" if value >= threshold else "black"
+                ax.text(
+                    x,
+                    y,
+                    f"{value:.0f}",
+                    ha="center",
+                    va="center",
+                    fontsize=24,
+                    fontweight="bold",
+                    color=text_colour,
+                )
 
-    plt.tight_layout()
-    plt.savefig(OUTPUT_DIR / filename, dpi=300, bbox_inches="tight")
-    plt.close()
+    fig.tight_layout()
+    fig.savefig(OUTPUT_DIR / filename, format="png", bbox_inches="tight")
+    plt.close(fig)
+
+def plot_capacity_response_curve(
+    summary_df: pd.DataFrame,
+    value_col: str,
+    y_label: str,
+    filename: str,
+) -> None:
+    fig, ax = plt.subplots(figsize=(9, 6))
+
+    for biopsy_capacity in sorted(summary_df["biopsy_capacity"].unique()):
+        sub = (
+            summary_df[summary_df["biopsy_capacity"] == biopsy_capacity]
+            .sort_values("mri_capacity")
+        )
+
+        ax.plot(
+            sub["mri_capacity"],
+            sub[value_col],
+            marker="o",
+            linewidth=2,
+            label=f"Biopsy capacity = {biopsy_capacity}/week",
+        )
+
+    ax.set_xlabel("MRI capacity per week")
+    ax.set_ylabel(y_label)
+    ax.legend(frameon=False)
+    ax.grid(True, alpha=0.25)
+
+    fig.tight_layout()
+    fig.savefig(OUTPUT_DIR / filename, dpi=300, bbox_inches="tight")
+    fig.savefig(OUTPUT_DIR / filename.replace(".png", ".svg"), bbox_inches="tight")
+    plt.close(fig)
 
 
 def save_and_plot_summary(
@@ -245,10 +305,17 @@ def save_and_plot_summary(
 
     plot_heatmap(
         summary_df=summary_df,
-        value_col="metric_mean_mean",
+        value_col="metric_median_mean",
         colourbar_label=heatmap_label,
         title=f"{metric_name}\nAll PROSTAD patients ({len(SEEDS)} seeds)",
-        filename=f"{filename_prefix}_heatmap_all_prostad.png",
+        filename=f"{filename_prefix}_heatmap_all_prostad_fri.png",
+    )
+
+    plot_capacity_response_curve(
+        summary_df=summary_df,
+        value_col="metric_median_mean",
+        y_label=heatmap_label,
+        filename=f"{filename_prefix}_capacity_response_curve_all_prostad_bopcap1.png",
     )
 
 
@@ -320,8 +387,8 @@ def main() -> None:
 
     save_and_plot_summary(
         summary_df=outpatient_summary,
-        metric_name="Mean time to outpatient appointment",
-        heatmap_label="Mean time to outpatient appointment (days)",
+        metric_name="Median time to outpatient appointment",
+        heatmap_label="Median days (referral to patient informed)",
         filename_prefix="time_to_outpatient",
     )
 

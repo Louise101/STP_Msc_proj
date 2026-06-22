@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 from typing import Iterable
+from scipy.stats import ks_2samp, shapiro
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,7 +24,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 START_DATE = date(2026, 1, 5)
 N_DAYS = 365
 LAM_PER_WORKDAY = 0.586 # pre lamda from combined_ref_value_calc.py
-SEED = 1
+SEEDS = range(1000, 1030)
 
 FULL_PATHWAY_EVENT = "Outpatient_appointment_occured"
 
@@ -48,16 +49,24 @@ STAGE_LABELS = {
 }
 
 
-def build_baseline_result() -> dict:
-    """Run the ALL_BASELINE scenario once for validation plots."""
-    cfg = build_combined_config(
-        "ALL_BASELINE",
-        start_date=START_DATE,
-        n_days=N_DAYS,
-        lam_per_workday=LAM_PER_WORKDAY,
-        seed=SEED,
-    )
-    return run_day_loop_combined_engine(cfg)
+def build_baseline_results() -> list[dict]:
+    """Run the ALL_BASELINE scenario across multiple seeds."""
+    results = []
+
+    for seed in SEEDS:
+        print(f"Running seed {seed}")
+
+        cfg = build_combined_config(
+            "ALL_BASELINE",
+            start_date=START_DATE,
+            n_days=N_DAYS,
+            lam_per_workday=LAM_PER_WORKDAY,
+            seed=seed,
+        )
+
+        results.append(run_day_loop_combined_engine(cfg))
+
+    return results
 
 
 def extract_stage_waits(result: dict, scenario_name: str) -> pd.DataFrame:
@@ -221,14 +230,182 @@ def plot_boxplot(sim_series: pd.Series, real_series: pd.Series, title: str, out_
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close()
 
+def summarise_real_wait_distributions(real_stage_waits: pd.DataFrame) -> pd.DataFrame:
+    """Create descriptive summary table for real baseline stage wait distributions."""
+    rows: list[dict] = []
+
+    for stage in STAGE_ORDER:
+        values = (
+            real_stage_waits.loc[real_stage_waits["stage"] == stage, "wait_days"]
+            .dropna()
+            .astype(float)
+        )
+
+        if values.empty:
+            continue
+
+        # Shapiro-Wilk is suitable here because each stage has n < 5000.
+        shapiro_stat, shapiro_p = shapiro(values)
+
+        q1 = values.quantile(0.25)
+        q3 = values.quantile(0.75)
+
+        rows.append(
+            {
+                "stage": stage,
+                "label": STAGE_LABELS.get(stage, stage),
+                "n": len(values),
+                "mean_days": values.mean(),
+                "median_days": values.median(),
+                "iqr_days": q3 - q1,
+                "q1_days": q1,
+                "q3_days": q3,
+                "min_days": values.min(),
+                "max_days": values.max(),
+                "skewness": values.skew(),
+                "shapiro_w": shapiro_stat,
+                "shapiro_p": shapiro_p,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+def summarise_stage_validation(sim_series: pd.Series, real_series: pd.Series) -> dict:
+    """Return compact validation statistics for one stage or full pathway."""
+    sim = sim_series.dropna().astype(float)
+    real = real_series.dropna().astype(float)
+
+    ks_stat, ks_p = ks_2samp(sim, real)
+
+    return {
+        "n_real": len(real),
+        "n_sim": len(sim),
+        "median_real": real.median(),
+        "median_sim": sim.median(),
+        "iqr_real": real.quantile(0.75) - real.quantile(0.25),
+        "iqr_sim": sim.quantile(0.75) - sim.quantile(0.25),
+        "p90_real": np.percentile(real, 90),
+        "p90_sim": np.percentile(sim, 90),
+        "ks_stat": ks_stat,
+        "ks_pvalue": ks_p,
+    }
+
+def plot_combined_stage_ecdfs(
+    sim_stage_waits: pd.DataFrame,
+    real_stage_waits: pd.DataFrame,
+    sim_pathway: pd.DataFrame,
+    real_pathway: pd.DataFrame,
+    out_path: Path,
+) -> None:
+    """Create one multi-panel ECDF figure for stage waits plus total pathway time."""
+
+    plot_items = []
+
+    for stage in STAGE_ORDER:
+        plot_items.append(
+            {
+                "label": STAGE_LABELS.get(stage, stage),
+                "sim_values": sim_stage_waits.loc[
+                    sim_stage_waits["stage"] == stage, "wait_days"
+                ],
+                "real_values": real_stage_waits.loc[
+                    real_stage_waits["stage"] == stage, "wait_days"
+                ],
+            }
+        )
+
+    plot_items.append(
+        {
+            "label": "Total pathway time",
+            "sim_values": sim_pathway["total_days"],
+            "real_values": real_pathway["total_days"],
+        }
+    )
+
+    n_items = len(plot_items)
+    n_cols = 2
+    n_rows = int(np.ceil(n_items / n_cols))
+
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(11, 15),
+        sharey=True,
+    )
+
+    axes = axes.flatten()
+
+    for ax, item in zip(axes, plot_items):
+        sim_series = item["sim_values"].dropna().astype(float)
+        real_series = item["real_values"].dropna().astype(float)
+
+        if sim_series.empty or real_series.empty:
+            ax.axis("off")
+            continue
+
+        rx, ry = ecdf(real_series)
+        sx, sy = ecdf(sim_series)
+
+        ax.step(rx, ry, where="post", label="Observed", linewidth=2.5)
+        ax.step(sx, sy, where="post", label="Simulated", linewidth=2.5)
+
+        stats = summarise_stage_validation(sim_series, real_series)
+
+        ax.set_title(item["label"], fontsize=18)
+        ax.set_xlabel("Wait time (days)", fontsize=15)
+        ax.set_ylabel("ECDF", fontsize=15)
+        ax.grid(alpha=0.3)
+        ax.tick_params(axis="both", labelsize=15)
+
+        ax.text(
+            0.03,
+            0.97,
+            f"KS={stats['ks_stat']:.2f}\np={stats['ks_pvalue']:.3f}",
+            transform=ax.transAxes,
+            fontsize=12,
+            verticalalignment="top",
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+        )
+
+    for ax in axes[n_items:]:
+        ax.axis("off")
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="upper center",
+        ncol=2,
+        frameon=False,
+        fontsize=18,
+    )
+
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close()
+    
 def main() -> None:
     # ------------------------------------------------------------------
     # 1. Run baseline simulation
     # ------------------------------------------------------------------
-    result = build_baseline_result()
+    results = build_baseline_results()
 
-    sim_stage_waits = extract_stage_waits(result, "ALL_BASELINE")
-    sim_pathway = extract_full_pathway_lengths(result, "ALL_BASELINE")
+# Pool patient-level outputs across all seeds
+    sim_stage_waits = pd.concat(
+        [
+            extract_stage_waits(result, f"ALL_BASELINE_seed_{i}")
+            for i, result in enumerate(results)
+        ],
+        ignore_index=True,
+    )
+
+    sim_pathway = pd.concat(
+        [
+            extract_full_pathway_lengths(result, f"ALL_BASELINE_seed_{i}")
+            for i, result in enumerate(results)
+        ],
+        ignore_index=True,
+    )
 
     # ------------------------------------------------------------------
     # 2. Load real baseline pathway data
@@ -250,103 +427,126 @@ def main() -> None:
     real_stage_waits = load_real_stage_waits(DATA_DIR).copy()
     real_stage_waits = real_stage_waits[real_stage_waits["scenario"] == "pre"].copy()
 
+        # ------------------------------------------------------------------
+    # 2b. Real baseline descriptive wait distribution summary
     # ------------------------------------------------------------------
-    # 3. Stage-level ECDF plots + summary table
+    real_wait_distribution_summary = summarise_real_wait_distributions(real_stage_waits)
+
+    real_wait_distribution_summary.to_csv(
+        OUTPUT_DIR / "baseline_real_wait_distribution_summary.csv",
+        index=False,
+    )
+
+    print("\n=== REAL BASELINE WAIT DISTRIBUTION SUMMARY ===")
+    print(
+        real_wait_distribution_summary[
+            [
+                "label",
+                "n",
+                "median_days",
+                "q1_days",
+                "q3_days",
+                "iqr_days",
+                "skewness",
+                "shapiro_p",
+            ]
+        ]
+        .round(
+            {
+                "median_days": 1,
+                "q1_days": 1,
+                "q3_days": 1,
+                "iqr_days": 1,
+                "skewness": 2,
+                "shapiro_p": 4,
+            }
+        )
+        .to_string(index=False)
+    )
+
+    # ------------------------------------------------------------------
+    # 3. Combined stage-level ECDF figure + compact summary table
+    #    Including total pathway time
     # ------------------------------------------------------------------
     stage_rows: list[dict] = []
 
     for stage in STAGE_ORDER:
-        sim_series = sim_stage_waits.loc[sim_stage_waits["stage"] == stage, "wait_days"]
-        real_series = real_stage_waits.loc[real_stage_waits["stage"] == stage, "wait_days"]
+        sim_series = sim_stage_waits.loc[
+            sim_stage_waits["stage"] == stage, "wait_days"
+        ]
 
-        if len(sim_series) == 0 or len(real_series) == 0:
+        real_series = real_stage_waits.loc[
+            real_stage_waits["stage"] == stage, "wait_days"
+        ]
+
+        if len(sim_series.dropna()) == 0 or len(real_series.dropna()) == 0:
             continue
 
         stage_rows.append(
             {
-                "level": "stage",
                 "stage": stage,
                 "label": STAGE_LABELS.get(stage, stage),
-                **compare_distributions(sim_series, real_series),
+                **summarise_stage_validation(sim_series, real_series),
             }
         )
 
-        plot_ecdf(
-            sim_series=sim_series,
-            real_series=real_series,
-            title=f"Baseline validation ECDF: {STAGE_LABELS.get(stage, stage)}",
-            out_path=OUTPUT_DIR / f"ecdf_{stage}.png",
-        )
-
-        plot_boxplot(
-            sim_series=sim_series,
-            real_series=real_series,
-            title=f"Baseline validation boxplot: {STAGE_LABELS.get(stage, stage)}",
-            out_path=OUTPUT_DIR / f"boxplot_{stage}.png",
+    # Total pathway time row
+    if len(sim_pathway["total_days"].dropna()) > 0 and len(real_pre_path["total_days"].dropna()) > 0:
+        stage_rows.append(
+            {
+                "stage": "total_pathway_time",
+                "label": "Total pathway time",
+                **summarise_stage_validation(
+                    sim_pathway["total_days"],
+                    real_pre_path["total_days"],
+                ),
+            }
         )
 
     stage_summary_df = pd.DataFrame(stage_rows)
-    stage_summary_df.to_csv(OUTPUT_DIR / "baseline_stage_validation_summary.csv", index=False)
 
-    # ------------------------------------------------------------------
-    # 4. Full-pathway ECDF + summary row
-    # ------------------------------------------------------------------
-    pathway_summary = compare_distributions(sim_pathway["total_days"], real_pre_path["total_days"])
-    pathway_summary_df = pd.DataFrame(
-        [
-            {
-                "level": "full_pathway",
-                "stage": "full_pathway",
-                "label": "Full pathway",
-                **pathway_summary,
-            }
-        ]
-    )
-    pathway_summary_df.to_csv(OUTPUT_DIR / "baseline_full_pathway_validation_summary.csv", index=False)
-
-    plot_ecdf(
-        sim_series=sim_pathway["total_days"],
-        real_series=real_pre_path["total_days"],
-        title="Baseline validation ECDF: Full pathway time",
-        out_path=OUTPUT_DIR / "ecdf_full_pathway.png",
+    stage_summary_df.to_csv(
+        OUTPUT_DIR / "standard_pathway_stage_and_total_validation_summary.csv",
+        index=False,
     )
 
-    plot_boxplot(
-        sim_series=sim_pathway["total_days"],
-        real_series=real_pre_path["total_days"],
-        title="Baseline validation boxplot: Full pathway time",
-        out_path=OUTPUT_DIR / "boxplot_full_pathway.png",
+    plot_combined_stage_ecdfs(
+        sim_stage_waits=sim_stage_waits,
+        real_stage_waits=real_stage_waits,
+        sim_pathway=sim_pathway,
+        real_pathway=real_pre_path,
+        out_path=OUTPUT_DIR / "combined_stage_and_total_ecdfs_standard_pathway.png",
     )
 
-    # ------------------------------------------------------------------
-    # 5. Combined summary table
-    # ------------------------------------------------------------------
-    validation_summary = pd.concat([stage_summary_df, pathway_summary_df], ignore_index=True)
-    validation_summary.to_csv(OUTPUT_DIR / "baseline_validation_summary_all.csv", index=False)
+    plot_combined_stage_ecdfs(
+        sim_stage_waits=sim_stage_waits,
+        real_stage_waits=real_stage_waits,
+        sim_pathway=sim_pathway,
+        real_pathway=real_pre_path,
+        out_path=OUTPUT_DIR / "combined_stage_and_total_ecdfs_standard_pathway.svg",
+    )
 
-    print("\n=== BASELINE VALIDATION SUMMARY ===")
+    print("\n=== STANDARD PATHWAY STAGE + TOTAL VALIDATION SUMMARY ===")
     print(
-        validation_summary[
+        stage_summary_df[
             [
                 "label",
-                "n_sim",
                 "n_real",
-                "mean_sim",
-                "mean_real",
-                "median_sim",
+                "n_sim",
                 "median_real",
-                "p90_sim",
+                "median_sim",
+                "iqr_real",
+                "iqr_sim",
                 "p90_real",
-                "mean_diff",
-                "median_diff",
+                "p90_sim",
                 "ks_stat",
                 "ks_pvalue",
             ]
-        ].round(3).to_string(index=False)
+        ]
+        .round(3)
+        .to_string(index=False)
     )
-    
-    
-    print(f"\nSaved outputs to: {OUTPUT_DIR}")
+
 
 
 if __name__ == "__main__":

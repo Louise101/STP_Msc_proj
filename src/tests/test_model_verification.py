@@ -124,3 +124,60 @@ def test_prostad_fixed_rule_applied():
             if "mri_report_ready" in events and "mri_performed" in events:
                 diff = (events["mri_report_ready"]["date"] - events["mri_performed"]["date"]).days
                 assert diff >= 0
+
+def test_completed_patients_have_only_one_terminal_event():
+    cfg = build_test_config(seed=10)
+    res = run_day_loop_combined_engine(cfg)
+
+    terminal_events = {
+        "Outpatient_appointment_occured",
+        "Path_report_outcome",
+        "mdt_decision",
+    }
+
+    for patient in res["completed_patients_objects"]:
+        names = get_patient_event_names(patient)
+        terminals_found = [ev for ev in names if ev in terminal_events]
+
+        assert len(terminals_found) == 1
+
+def test_patient_conservation_combined_engine():
+    cfg = build_test_config(seed=11)
+    res = run_day_loop_combined_engine(cfg)
+
+    all_patients = res["all_patients_objects"]
+    completed = res["completed_patients_objects"]
+
+    completed_ids = {p.patient_id for p in completed}
+    all_ids = {p.patient_id for p in all_patients}
+
+    assert completed_ids.issubset(all_ids)
+    assert len(all_ids) == len(all_patients)
+
+    incomplete = [p for p in all_patients if not p.is_complete]
+
+    assert len(all_patients) == len(completed) + len(incomplete)
+
+
+def test_same_seed_gives_same_referral_pattern_across_comparable_runs():
+    cfg1 = build_test_config(seed=123)
+    cfg2 = build_test_config(seed=123)
+
+    res1 = run_day_loop_combined_engine(cfg1)
+    res2 = run_day_loop_combined_engine(cfg2)
+
+    referrals1 = (
+        res1["event_log"]
+        .query("event == 'referral_received' or event == 'referral_recieved'")
+        [["patient_id", "date"]]
+        .reset_index(drop=True)
+    )
+
+    referrals2 = (
+        res2["event_log"]
+        .query("event == 'referral_received' or event == 'referral_recieved'")
+        [["patient_id", "date"]]
+        .reset_index(drop=True)
+    )
+
+    assert referrals1.equals(referrals2)

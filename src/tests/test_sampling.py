@@ -190,3 +190,15 @@ def test_sample_poisson_weekday_only_weekday_matches_base_poisson():
     d_base = sample_poisson(lam, n=1, rng=rng2)
 
     assert d_weekday_only == d_base
+
+def test_sample_outcome_matches_expected_probabilities_approximately():
+    probs = {0: 0.2, 1: 0.5, 2: 0.3}
+    rng = np.random.default_rng(123)
+
+    draws = sample_outcome(probs, n=20_000, rng=rng)
+
+    observed = {k: draws.count(k) / len(draws) for k in probs}
+
+    assert observed[0] == pytest.approx(0.2, abs=0.02)
+    assert observed[1] == pytest.approx(0.5, abs=0.02)
+    assert observed[2] == pytest.approx(0.3, abs=0.02)

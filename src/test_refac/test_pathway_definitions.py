@@ -33,12 +33,15 @@ def test_each_stage_config_has_required_keys():
         assert required_keys.issubset(stage_cfg.keys()), f"{stage_name} missing required keys"
 
 
-def test_ref_to_mri_is_only_stage_with_resource():
-    assert STAGE_CONFIG["ref_to_mri"]["resource"] == "MRI_PROSTAD"
+def test_only_des_stages_have_resources():
+    expected_resources = {
+        "ref_to_mri": "MRI_PROSTAD",
+        "biopmdt_to_biopsy": "BIOPSY",
+    }
 
     for stage_name, stage_cfg in STAGE_CONFIG.items():
-        if stage_name != "ref_to_mri":
-            assert stage_cfg["resource"] is None
+        expected = expected_resources.get(stage_name)
+        assert stage_cfg["resource"] == expected
 
 
 def test_pdf_keys_are_unique():

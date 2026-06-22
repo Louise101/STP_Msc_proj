@@ -120,7 +120,10 @@ def test_initialize_pending_mc_creates_empty_dict_for_each_stage():
 def test_initialize_pending_des_arrivals_creates_expected_resource_map():
     pending = initialize_pending_des_arrivals()
 
-    assert pending == {"MRI_PROSTAD": {}}
+    assert pending == {
+        "MRI_PROSTAD": {},
+        "BIOPSY": {},
+    }
 
 
 def test_initialize_stage_activity_creates_expected_structure():

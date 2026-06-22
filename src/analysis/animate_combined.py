@@ -9,7 +9,7 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.animation import FuncAnimation, PillowWriter
+from matplotlib.animation import FuncAnimation, PillowWriter, FFMpegWriter
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 
@@ -22,6 +22,7 @@ OUTPUT_DIR = BASE_DIR / "outputs" / "combined_animation"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 OUTPUT_GIF = OUTPUT_DIR / "combined_pathway_animation_m3.gif"
+OUTPUT_MP4 = OUTPUT_DIR / "combined_pathway_animation_m3.mp4"
 
 START_DATE = date(2024, 1, 5)
 N_DAYS = 365
@@ -446,7 +447,11 @@ def draw_static_layout(ax) -> None:
     ax.axis("off")
 
 
-def make_animation(positioned_daily: pd.DataFrame) -> None:
+def make_animation(
+    positioned_daily: pd.DataFrame,
+    save_gif: bool = False,
+    save_mp4: bool = True,
+) -> None:
     dates = sorted(positioned_daily["date"].dropna().unique())
     patient_colour_map = assign_patient_outcome_colours(positioned_daily)
 
@@ -494,42 +499,14 @@ def make_animation(positioned_daily: pd.DataFrame) -> None:
         )
 
         legend_elements = [
-            Line2D(
-                [0],
-                [0],
-                marker="o",
-                color="w",
-                label="Completed pathway",
-                markerfacecolor="tab:blue",
-                markersize=8,
-            ),
-            Line2D(
-                [0],
-                [0],
-                marker="o",
-                color="w",
-                label="Exit after pathology",
-                markerfacecolor="tab:orange",
-                markersize=8,
-            ),
-            Line2D(
-                [0],
-                [0],
-                marker="o",
-                color="w",
-                label="Exit after decision",
-                markerfacecolor="tab:red",
-                markersize=8,
-            ),
-            Line2D(
-                [0],
-                [0],
-                marker="o",
-                color="w",
-                label="Unknown / unresolved",
-                markerfacecolor="tab:gray",
-                markersize=8,
-            ),
+            Line2D([0], [0], marker="o", color="w", label="Completed pathway",
+                   markerfacecolor="tab:blue", markersize=8),
+            Line2D([0], [0], marker="o", color="w", label="Exit after pathology",
+                   markerfacecolor="tab:orange", markersize=8),
+            Line2D([0], [0], marker="o", color="w", label="Exit after decision",
+                   markerfacecolor="tab:red", markersize=8),
+            Line2D([0], [0], marker="o", color="w", label="Unknown / unresolved",
+                   markerfacecolor="tab:gray", markersize=8),
         ]
 
         ax.legend(
@@ -550,10 +527,26 @@ def make_animation(positioned_daily: pd.DataFrame) -> None:
         repeat=False,
     )
 
-    print(f"Saving GIF to {OUTPUT_GIF}")
-    anim.save(OUTPUT_GIF, writer=PillowWriter(fps=FPS))
-    plt.close(fig)
+    if save_gif:
+        print(f"Saving GIF to {OUTPUT_GIF}")
+        anim.save(OUTPUT_GIF, writer=PillowWriter(fps=FPS))
 
+    if save_mp4:
+        print(f"Saving MP4 to {OUTPUT_MP4}")
+        writer = FFMpegWriter(
+            fps=FPS,
+            metadata={"artist": "Louise Finlayson"},
+            bitrate=1800,
+        )
+        anim.save(
+    OUTPUT_MP4,
+    writer="ffmpeg",
+    fps=FPS,
+    dpi=200,
+    bitrate=1800
+)
+
+    plt.close(fig)
 
 def main() -> None:
     print("Running combined model...")
