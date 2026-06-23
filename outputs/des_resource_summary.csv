@@ -1,8 +1,0 @@
-resource,days_with_activity,total_started,final_queue_len,mean_des_wait,median_des_wait,max_des_wait
-MRI,52,103,59,58.33009708737864,58.0,118
-Biopsy,43,70,0,1.0,1.0,1
-MRI_REPORT,52,103,0,1.0,1.0,1
-BIOPSY_MDT,51,101,2,6.0,6.0,6
-PATHOLOGY,43,70,0,0.0,0.0,0
-TREATMENT_MDT,39,54,0,1.0,1.0,1
-OUTPATIENT,39,54,0,0.0,0.0,0

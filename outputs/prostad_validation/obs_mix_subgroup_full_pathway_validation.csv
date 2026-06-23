@@ -1,3 +1,0 @@
-comparison,pathway_type,real_dataset,stage,label,n_sim,n_real,mean_sim,mean_real,median_sim,median_real,p90_sim,p90_real,mean_diff,median_diff,ks_stat,ks_pvalue
-OBS_MIX BASELINE vs pre,BASELINE,pre,full_pathway,Full pathway,52,49,92.8076923076923,94.26530612244898,94.5,92.0,115.8,118.2,-1.4576138147566695,2.5,0.1043956043956044,0.9100602849388908
-OBS_MIX PROSTAD vs pros,PROSTAD,pros,full_pathway,Full pathway,72,50,62.861111111111114,73.4,60.0,64.5,87.6,107.10000000000002,-10.538888888888891,-4.5,0.25555555555555554,0.03383266184444055

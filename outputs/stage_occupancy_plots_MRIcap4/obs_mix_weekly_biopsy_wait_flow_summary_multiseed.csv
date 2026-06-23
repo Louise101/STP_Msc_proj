@@ -1,3 +1,0 @@
-pathway_type,stage,n_runs,mean_entering_biopsy_wait_per_week,mean_had_biopsy_per_week,mean_net_biopsy_wait_per_week,total_entered_biopsy_wait_mean,total_had_biopsy_mean,total_net_biopsy_wait_mean
-BASELINE,biopmdt_to_biopsy,30,1.3710691823899372,1.3710691823899372,0.0,72.66666666666667,72.66666666666667,0.0
-PROSTAD,biopmdt_to_biopsy,30,1.4484276729559749,1.4484276729559749,0.0,76.76666666666667,76.76666666666667,0.0

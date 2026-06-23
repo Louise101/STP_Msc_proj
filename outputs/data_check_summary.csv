@@ -1,8 +1,0 @@
-stage,n_rows,missing_start_dates,missing_end_dates,negative_waits,zero_waits,valid_waits_n,mean_wait,median_wait,min_wait,max_wait,iqr_outliers,shapiro_p,distribution_hint
-pre_ref_to_mri,150,0,0,0,0,150,25.28,22.0,6.0,114.0,7,4.127584565131118e-13,likely non-normal/skewed
-pre_mri_to_mrirep,150,0,0,0,11,150,7.406666666666666,7.0,0.0,28.0,2,5.017706442290238e-05,likely non-normal/skewed
-pre_mrirep_to_biopmdt,147,0,0,0,1,147,5.238095238095238,6.0,0.0,10.0,0,1.0479001567464604e-06,likely non-normal/skewed
-pre_biopmdt_to_biop,69,0,0,0,0,69,27.92753623188406,23.0,8.0,76.0,3,2.8329712931854984e-07,likely non-normal/skewed
-pre_biop_to_pathrep,64,0,0,0,0,64,8.734375,7.0,1.0,24.0,2,6.25334231577388e-05,likely non-normal/skewed
-pre_pathrep_to_treatmdt,49,0,0,0,0,49,10.73469387755102,9.0,4.0,29.0,7,4.617090903650202e-06,likely non-normal/skewed
-pre_treatmdt_to_outpat,57,8,8,0,1,49,11.183673469387756,12.0,0.0,39.0,4,2.3718258230531025e-08,likely non-normal/skewed
