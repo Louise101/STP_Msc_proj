@@ -1,7 +1,6 @@
 from pathlib import Path
 from data_prep.empirical_inputs import build_branching
 
-# Adjust if needed
 DATA_DIR = Path("data")
 
 branching = build_branching(DATA_DIR)

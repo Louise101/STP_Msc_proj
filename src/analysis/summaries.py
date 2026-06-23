@@ -21,10 +21,8 @@ MILESTONE_EVENTS = [
 
 
 
-
-
+#Flatten the nested daily wait storage produced by queue resources
 def flatten_wait_values(daily_waits: dict) -> list[float]:
-    """Flatten the nested daily wait storage produced by queue resources."""
     flat: list[float] = []
     for value in (daily_waits or {}).values():
         if value is None:
@@ -35,17 +33,15 @@ def flatten_wait_values(daily_waits: dict) -> list[float]:
             flat.append(value)
     return flat
 
-
+#Count how many times an event appears in the event log.
 def count_event_occurrences(result: dict, event_name: str) -> int:
-    """Count how many times an event appears in the event log."""
     event_log = result.get("event_log")
     if event_log is None or event_log.empty:
         return 0
     return int((event_log["event"] == event_name).sum())
 
-
+#Rebuild stage waits from consecutive event dates in patient results.
 def extract_stage_waits(result: dict, scenario_name: str, seed: int | None = None) -> pd.DataFrame:
-    """Rebuild stage waits from consecutive event dates in patient results."""
     rows: list[dict] = []
     for events, _ in result["patient_results"]:
         if not events:
@@ -66,9 +62,8 @@ def extract_stage_waits(result: dict, scenario_name: str, seed: int | None = Non
             )
     return pd.DataFrame(rows)
 
-
+#Summarise stage waits by scenario and stage.
 def summarise_stage_waits(stage_wait_df: pd.DataFrame) -> pd.DataFrame:
-    """Summarise stage waits by scenario and stage."""
     if stage_wait_df.empty:
         return pd.DataFrame(columns=["scenario", "stage", "n", "mean_wait", "median_wait", "p90_wait"])
     return (
@@ -82,9 +77,8 @@ def summarise_stage_waits(stage_wait_df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
 
-
+#Summarise daily stage activity into one row per stage.
 def summarise_stage_activity(result: dict, scenario_name: str, seed: int) -> pd.DataFrame:
-    """Summarise daily stage activity into one row per stage."""
     rows: list[dict] = []
     for stage_name, metrics in result.get("stage_activity", {}).items():
         arrivals = metrics.get("daily_arrivals", {}) or {}
@@ -113,9 +107,8 @@ def summarise_stage_activity(result: dict, scenario_name: str, seed: int) -> pd.
         )
     return pd.DataFrame(rows)
 
-
+#Convert daily stage arrivals into week-indexed counts.
 def summarise_stage_weekly_arrivals(result: dict, scenario_name: str, seed: int) -> pd.DataFrame: 
-    """Convert daily stage arrivals into week-indexed counts."""
     rows: list[pd.DataFrame] = []
     for stage_name, metrics in result.get("stage_activity", {}).items():
         arrivals = metrics.get("daily_arrivals", {}) or {}
@@ -141,9 +134,8 @@ def summarise_stage_weekly_arrivals(result: dict, scenario_name: str, seed: int)
         return pd.DataFrame(columns=["week_start", "weekly_arrivals", "scenario", "seed", "stage"])
     return pd.concat(rows, ignore_index=True)
 
-
+#Count milestone events for one simulation run.
 def summarise_flow_counts(result: dict, scenario_name: str, seed: int) -> pd.DataFrame:
-    """Count milestone events for one simulation run."""
     rows = [
         {
             "scenario": scenario_name,
@@ -165,9 +157,8 @@ def summarise_flow_counts_across_seeds(flow_df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
 
-
+#Summarise queue pressure for the MRI_PROSTAD resource only.
 def summarise_mri_resource(result: dict[str, Any], scenario_name: str, seed: int) -> pd.DataFrame:
-    """Summarise queue pressure for the MRI_PROSTAD resource only."""
     rows: list[dict[str, Any]] = []
 
     for resource_name, metrics in result.get("resources", {}).items():
@@ -192,9 +183,8 @@ def summarise_mri_resource(result: dict[str, Any], scenario_name: str, seed: int
 
     return pd.DataFrame(rows)
 
-
+#Summarise queue and wait behaviour for each resource.
 def summarise_resource_pressure(result: dict, scenario_name: str, seed: int) -> pd.DataFrame:
-    """Summarise queue and wait behaviour for each resource."""
     rows: list[dict] = []
     for resource_name, metrics in result.get("resources", {}).items():
         queue_values = list((metrics.get("daily_queue_len", {}) or {}).values())
@@ -213,11 +203,9 @@ def summarise_resource_pressure(result: dict, scenario_name: str, seed: int) -> 
         )
     return pd.DataFrame(rows)
 
-
+#Extract pathway lengths for patients who reached full outpatient completion.
 def extract_full_pathway_lengths(result: dict, scenario_name: str, seed: int | None = None) -> pd.DataFrame:
-    """Extract pathway lengths for patients who reached full outpatient completion."""
     rows: list[dict] = []
-    #test - ccan delete
     for patient in result["completed_patients_objects"][:20]:
         if patient.has_event(FULL_PATHWAY_END_EVENT):
             print(
@@ -227,7 +215,7 @@ def extract_full_pathway_lengths(result: dict, scenario_name: str, seed: int | N
                 (patient.current_date - patient.start_date).days,
                 [e["event"] for e in patient.events],
             )
-# end test
+
     for patient in result.get("completed_patients_objects", []):
         if not patient.has_event(FULL_PATHWAY_END_EVENT):
             continue
@@ -242,9 +230,8 @@ def extract_full_pathway_lengths(result: dict, scenario_name: str, seed: int | N
         )
     return pd.DataFrame(rows)
 
-
+#Summarise full-pathway durations by scenario.
 def summarise_pathway_lengths(pathway_df: pd.DataFrame) -> pd.DataFrame:
-    """Summarise full-pathway durations by scenario."""
     if pathway_df.empty:
         return pd.DataFrame(columns=["scenario", "n", "mean_days", "median_days", "p90_days", "pct_within_62"])
     return (
@@ -259,8 +246,8 @@ def summarise_pathway_lengths(pathway_df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
 
+#Summarise full-pathway durations by scenario.
 def summarise_pathway_stats(pathway_df: pd.DataFrame) -> pd.DataFrame:
-    """Summarise full-pathway durations by scenario."""
     if pathway_df.empty:
         return pd.DataFrame(columns=["scenario", "n", "mean_days", "median_days", "p90_days", "pct_within_62"])
     return (
@@ -280,8 +267,8 @@ def summarise_pathway_stats(pathway_df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
 
+#Within OBS_MIX, compare full-pathway durations by patient pathway type.
 def summarise_mixed_pathway_type(pathway_df: pd.DataFrame) -> pd.DataFrame:
-    """Within OBS_MIX, compare full-pathway durations by patient pathway type."""
     if pathway_df.empty:
         return pd.DataFrame(columns=["pathway_type", "n", "mean_days", "median_days", "p90", "pct_within_62"])
     return (

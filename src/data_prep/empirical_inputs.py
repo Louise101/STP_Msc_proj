@@ -52,9 +52,8 @@ STAGE_LABELS = {
     "treatmdt_to_outpat": "Treat MDT â Outpatient",
 }
 
-
+#Parse real-world date columns that use mixed UK and US formats.
 def parse_date_series(series: pd.Series, style: str) -> pd.Series:
-    """Parse real-world date columns that use mixed UK and US formats."""
     if style == "uk":
         return pd.to_datetime(series, dayfirst=True, errors="coerce")
     if style == "us":
@@ -62,20 +61,6 @@ def parse_date_series(series: pd.Series, style: str) -> pd.Series:
     return pd.to_datetime(series, errors="coerce")
 
 
-
-#def load_real_stage_data(dataset: str, data_dir: Path) -> dict[str, pd.Series]:
- #   """Load real observed wait distributions for each stage."""
-  #  specs = REAL_STAGE_SPECS[dataset]
-    # outputs: dict[str, pd.Series] = {}
-
-    # for stage, (filename, start_col, end_col, style) in specs.items():
-    #     df = pd.read_csv(data_dir / filename)
-    #     start_dates = parse_date_series(df[start_col], style)
-    #     end_dates = parse_date_series(df[end_col], style)
-    #     waits = (end_dates - start_dates).dt.days
-    #     outputs[stage] = waits[(waits.notna()) & (waits >= 0)]
-
-    # return outputs
 
 def load_real_stage_waits(data_dir: Path) -> pd.DataFrame:
     rows = []
@@ -98,15 +83,8 @@ def load_real_stage_waits(data_dir: Path) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-
+#Load a CSV and parse the supplied date columns.
 def load_dates(path: Path, date_cols: list[str]) -> pd.DataFrame:
-    """
-    Load a CSV and parse the supplied date columns.
-
-    Pre-PROSTAD files appear to be UK-style day-first dates, but some may not
-    exactly match one strict format, so use dayfirst=True rather than a single
-    rigid format string.
-    """
     df = pd.read_csv(path)
 
     for c in date_cols:
@@ -115,38 +93,28 @@ def load_dates(path: Path, date_cols: list[str]) -> pd.DataFrame:
     return df
 
 
+#Days from each date in d to the next target weekday.
+    #Monday=0 ... Sunday=6
 def days_to_next_weekday(d: pd.Series, target_weekday: int, include_today: bool = True) -> pd.Series:
-    """
-    Days from each date in d to the next target weekday.
-    Monday=0 ... Sunday=6
-    """
     wd = d.dt.weekday
     if include_today:
         return (target_weekday - wd) % 7
     return ((target_weekday - (wd + 1)) % 7) + 1
 
-
+#Remove NaNs and waits below min_valid.
 def clean_waits(series: pd.Series, min_valid: int = 0) -> pd.Series:
-    """
-    Remove NaNs and waits below min_valid.
-    Default keeps 0+ and removes negatives only.
-    """
     s = pd.to_numeric(series, errors="coerce").dropna().copy()
     s = s[s >= min_valid]
     return s.astype(int)
 
-
+#Calculate wait in days between two date columns and clean it.
 def calc_wait(df: pd.DataFrame, start_col: str, end_col: str, min_valid: int = 0) -> pd.Series:
-    """
-    Calculate wait in days between two date columns and clean it.
-    """
     waits = (df[end_col] - df[start_col]).dt.days
     return clean_waits(waits, min_valid=min_valid)
 
 
 
-"""Build all empirical PDFs used by the simulation.
-    """
+#Build all empirical PDFs used by the simulation.
 def build_pdfs(data_dir: Path = DATA_DIR) -> dict[str, pd.Series]:
 
     stage_frames: dict[str, pd.DataFrame] = {}
@@ -161,7 +129,7 @@ def build_pdfs(data_dir: Path = DATA_DIR) -> dict[str, pd.Series]:
 
 
 
-"""Build branching probabilities from the pre-PROSTAD outcome files."""
+#Build branching probabilities from the pre-PROSTAD outcome files
 def build_branching(data_dir: Path = DATA_DIR) -> dict[str, dict[int, float]]:
    
     biop_df = pd.read_csv(data_dir / "pre_biop_dec.csv")

@@ -1,5 +1,3 @@
-# Save as: src/analysis/animate_combined_pathway.py
-
 from __future__ import annotations
 
 from datetime import date, timedelta

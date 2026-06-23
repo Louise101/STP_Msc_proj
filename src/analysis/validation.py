@@ -71,14 +71,13 @@ def build_real_pathway_csvs(
     pros.to_csv(out_pros_file, index=False)
 
 
-# --------------------------------------------------
+
 # LOAD REAL DATA
-# --------------------------------------------------
+
 def load_real_pathway_data(pre_path: str, pros_path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     pre = pd.read_csv(pre_path).copy()
     pros = pd.read_csv(pros_path).copy()
 
-    # Adjust these if your actual CSV column names differ
     pre["referral_date"] = pd.to_datetime(pre["referral_date"], dayfirst=True, errors="coerce")
     pre["outpatient_date"] = pd.to_datetime(pre["outpatient_date"], dayfirst=True, errors="coerce")
 
@@ -96,13 +95,9 @@ def load_real_pathway_data(pre_path: str, pros_path: str) -> tuple[pd.DataFrame,
     return pre, pros
 
 
-# --------------------------------------------------
+
 # SIM DATA EXTRACTION
-# --------------------------------------------------
 def extract_sim_pathway_lengths(result: dict, scenario_name: str) -> pd.DataFrame:
-    """
-    Extract full-pathway completed patients only.
-    """
     rows = []
 
     for patient in result["completed_patients_objects"]:
@@ -127,9 +122,8 @@ def extract_sim_pathway_lengths(result: dict, scenario_name: str) -> pd.DataFram
     return pd.DataFrame(rows)
 
 
-
+#Compare simulated and real wait distributions using common summary metrics.
 def compare_wait_distributions(sim_series: pd.Series, real_series: pd.Series) -> dict:
-    """Compare simulated and real wait distributions using common summary metrics."""
     ks_stat, ks_p = ks_2samp(sim_series, real_series)
     return {
         "n_sim": len(sim_series),
@@ -146,20 +140,18 @@ def compare_wait_distributions(sim_series: pd.Series, real_series: pd.Series) ->
         "ks_pvalue": float(ks_p),
     }
 
-
+#Compare full pathway lengths between simulation and real data.
 def compare_pathway_distributions(sim_df: pd.DataFrame, real_df: pd.DataFrame, label: str) -> pd.DataFrame:
-    """Compare full pathway lengths between simulation and real data."""
     comp = compare_wait_distributions(sim_df["total_days"], real_df["total_days"])
     return pd.DataFrame([{"comparison": label, "level": "full_pathway", **comp}])
 
-
+#validation routine for baseline and observed-mix runs.
 def run_basic_validation(
     baseline_result: dict,
     mixed_result: dict,
     real_pre_df: pd.DataFrame,
     real_pros_df: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Small reusable validation routine for baseline and observed-mix runs."""
     sim_baseline = extract_full_pathway_lengths(baseline_result, "ALL_BASELINE")
     sim_mix = extract_full_pathway_lengths(mixed_result, "OBS_MIX")
     baseline_comp = compare_pathway_distributions(sim_baseline, real_pre_df, "ALL_BASELINE vs BASELINE_REAL")

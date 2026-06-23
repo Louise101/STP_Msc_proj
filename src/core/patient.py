@@ -4,10 +4,10 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Dict, List
 
-"""Object that represents one patient moving through the simulated pathway.
- events = a chronological audit trail used for validation and analysis.
- data = small pieces of derived state that make to help with routing and debugging 
-    """
+#Object that represents one patient moving through the simulated pathway.
+ #events = a chronological audit trail used for validation and analysis.
+ #data = small pieces of derived state that make to help with routing and debugging 
+
 
 
 @dataclass
@@ -27,7 +27,7 @@ class PatientState:
 
 
 
-    """Append one event record to the patient event log."""
+ #Append one event record to the patient event log
     def add_event(self, event: str, event_date: date, **kwargs) -> None:
         row = {
             "patient_id": self.patient_id,
@@ -37,12 +37,11 @@ class PatientState:
         row.update(kwargs)
         self.events.append(row)
 
-    """Return True if this patient has already recorded the given event."""
+   #Return True if this patient has already recorded the given event
     def has_event(self, event_name: str) -> bool:
         return any(event.get("event") == event_name for event in self.events)
     
     
-    """Total elapsed days from pathway start to the patient's current date."""
-    #@property
+    #Total elapsed days from pathway start to the patient's current date.
     def total_days_in_system(self) -> int:
         return (self.current_date - self.start_date).days

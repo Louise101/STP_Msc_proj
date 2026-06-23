@@ -192,7 +192,7 @@ def plot_heatmap(
     summary_df: pd.DataFrame,
     value_col: str,
     colourbar_label: str,
-    title: str,  # kept for compatibility, but not used
+    title: str, 
     filename: str,
 ) -> None:
     heatmap_df = summary_df.pivot(
@@ -234,7 +234,7 @@ def plot_heatmap(
     ax.set_xlabel("MRI capacity (per week)", fontsize=24, labelpad=10)
     ax.set_ylabel("Biopsy capacity (per week)", fontsize=24, labelpad=10)
 
-    # No title — add separately on poster
+
 
     values = heatmap_df.values
     threshold = np.nanmax(values) * 0.55

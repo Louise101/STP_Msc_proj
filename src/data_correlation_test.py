@@ -4,9 +4,8 @@ import numpy as np
 from functools import reduce
 from scipy.stats import spearmanr, kendalltau, zscore
 
-# ============================================================
+
 # PATH SETUP
-# ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -15,16 +14,7 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 
 PATIENT_ID_COL = "Subject number"
 
-# ============================================================
-# STAGE FILE CONFIGURATION
-# ============================================================
-# For each stage file, define:
-# - file: csv filename
-# - start_date_col: earlier date
-# - end_date_col: later date
-# - rename_to: name for calculated wait column
-#
-# Replace these with your actual filenames / date column names.
+
 
 STAGE_FILES = [
     {
@@ -71,14 +61,12 @@ STAGE_FILES = [
     },
 ]
 
-# ============================================================
-# HELPER FUNCTIONS
-# ============================================================
 
+# HELPER FUNCTIONS
+
+#Load one stage file, calculate wait in days from two date columns.
 def load_stage_file_from_dates(file_path, patient_id_col, start_date_col, end_date_col, rename_to):
-    """
-    Load one stage file, calculate wait in days from two date columns.
-    """
+
     df = pd.read_csv(file_path)
 
     required_cols = [patient_id_col, start_date_col, end_date_col]
@@ -92,11 +80,7 @@ def load_stage_file_from_dates(file_path, patient_id_col, start_date_col, end_da
     out[end_date_col] = pd.to_datetime(out[end_date_col], errors="coerce", dayfirst=True)
 
     out[rename_to] = (out[end_date_col] - out[start_date_col]).dt.days
-
-    # Keep only patient_id and calculated wait
     out = out[[patient_id_col, rename_to]]
-
-    # If duplicate patients exist, keep first non-null wait
     out = (
         out.sort_values(by=[patient_id_col])
            .drop_duplicates(subset=[patient_id_col], keep="first")
@@ -204,9 +188,8 @@ def fast_slow_comparison(data, early_col, later_col):
     return summary
 
 
-# ============================================================
 # LOAD STAGE FILES AND CALCULATE WAITS
-# ============================================================
+
 
 stage_dfs = []
 wait_cols = []
@@ -227,9 +210,8 @@ for cfg in STAGE_FILES:
 
 df = merge_dataframes_on_patient_id(stage_dfs, PATIENT_ID_COL)
 
-# ============================================================
+
 # BASIC CLEANING
-# ============================================================
 
 for col in wait_cols:
     df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -246,38 +228,35 @@ print(df[wait_cols].isna().sum())
 # Save merged waits
 df.to_csv(OUTPUT_DIR / "merged_pathway_waits.csv", index=False)
 
-# ============================================================
+
 # CORRELATION ANALYSIS
-# ============================================================
+
 
 corr_results = pairwise_correlation_table(df, wait_cols)
 spearman_matrix = df[wait_cols].corr(method="spearman")
 kendall_matrix = df[wait_cols].corr(method="kendall")
 
-print("\n============================================================")
+
 print("PAIRWISE CORRELATION RESULTS")
-print("============================================================")
+
 print(corr_results.to_string(index=False))
 
-print("\n============================================================")
+
 print("SPEARMAN CORRELATION MATRIX")
-print("============================================================")
+
 print(spearman_matrix)
 
-print("\n============================================================")
+
 print("KENDALL CORRELATION MATRIX")
-print("============================================================")
+
 print(kendall_matrix)
 
-# ============================================================
-# PATIENT PROGRESSION SPEED ANALYSIS
-# ============================================================
 
 speed_df = progression_speed_analysis(df, PATIENT_ID_COL, wait_cols)
 
-print("\n============================================================")
+
 print("PATIENT PROGRESSION SPEED SUMMARY")
-print("============================================================")
+
 print(speed_df["progression_group"].value_counts(dropna=False))
 
 print("\nFastest patients:")
@@ -296,9 +275,9 @@ print(
     .to_string(index=False)
 )
 
-# ============================================================
+
 # FAST EARLY -> FAST LATER CHECK
-# ============================================================
+
 
 comparison_tables = []
 
@@ -317,9 +296,8 @@ if comparison_tables:
 else:
     fast_slow_df = pd.DataFrame()
 
-# ============================================================
+
 # SAVE OUTPUTS
-# ============================================================
 
 corr_results.to_csv(OUTPUT_DIR / "pairwise_pathway_correlations.csv", index=False)
 spearman_matrix.to_csv(OUTPUT_DIR / "spearman_matrix.csv")

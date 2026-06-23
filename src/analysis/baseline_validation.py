@@ -48,9 +48,8 @@ STAGE_LABELS = {
     "treatmdt_to_outpat": "Treatment MDT → Outpatient",
 }
 
-
+#  Run the ALL_BASELINE scenario across multiple seeds.
 def build_baseline_results() -> list[dict]:
-    """Run the ALL_BASELINE scenario across multiple seeds."""
     results = []
 
     for seed in SEEDS:
@@ -68,13 +67,8 @@ def build_baseline_results() -> list[dict]:
 
     return results
 
-
+# Extract stage waits from event dates.
 def extract_stage_waits(result: dict, scenario_name: str) -> pd.DataFrame:
-    """Extract patient-level stage waits from event dates.
-
-    Uses explicit event lookup rather than adjacent event pairs so that
-    branch events like 'mdt_decision' do not break the stage extraction.
-    """
     rows: list[dict] = []
 
     stage_pairs = [
@@ -105,9 +99,8 @@ def extract_stage_waits(result: dict, scenario_name: str) -> pd.DataFrame:
 
     return pd.DataFrame(rows)
 
-
+#Extract full pathway times for patients who reached outpatient.
 def extract_full_pathway_lengths(result: dict, scenario_name: str) -> pd.DataFrame:
-    """Extract full-pathway times for patients who reached outpatient."""
     rows: list[dict] = []
 
     for patient in result["completed_patients_objects"]:
@@ -125,18 +118,16 @@ def extract_full_pathway_lengths(result: dict, scenario_name: str) -> pd.DataFra
 
     return pd.DataFrame(rows)
 
-
+#Return x and y coordinates for an ECDF
 def ecdf(values: Iterable[float]) -> tuple[np.ndarray, np.ndarray]:
-    """Return x and y coordinates for an ECDF."""
     x = np.asarray(list(values), dtype=float)
     x = x[~np.isnan(x)]
     x = np.sort(x)
     y = np.arange(1, len(x) + 1) / len(x) if len(x) else np.array([])
     return x, y
 
-
+#Calculate summary statistics and KS test results
 def compare_distributions(sim_series: pd.Series, real_series: pd.Series) -> dict:
-    """Calculate summary statistics and KS test results."""
     ks_stat, ks_p = ks_2samp(sim_series, real_series)
 
     return {
@@ -154,9 +145,8 @@ def compare_distributions(sim_series: pd.Series, real_series: pd.Series) -> dict
         "ks_pvalue": float(ks_p),
     }
 
-
+#Save one ECDF comparison plot with validation statistics.
 def plot_ecdf(sim_series: pd.Series, real_series: pd.Series, title: str, out_path: Path) -> None:
-    """Save one ECDF comparison plot with validation statistics."""
     sx, sy = ecdf(sim_series)
     rx, ry = ecdf(real_series)
 
@@ -197,8 +187,8 @@ def plot_ecdf(sim_series: pd.Series, real_series: pd.Series, title: str, out_pat
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close()
 
+#Save one boxplot comparison plot.
 def plot_boxplot(sim_series: pd.Series, real_series: pd.Series, title: str, out_path: Path) -> None:
-    """Save one boxplot comparison plot."""
     sim_values = sim_series.dropna().to_numpy()
     real_values = real_series.dropna().to_numpy()
 
@@ -230,8 +220,8 @@ def plot_boxplot(sim_series: pd.Series, real_series: pd.Series, title: str, out_
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close()
 
+#Create descriptive summary table for real baseline stage wait distributions.
 def summarise_real_wait_distributions(real_stage_waits: pd.DataFrame) -> pd.DataFrame:
-    """Create descriptive summary table for real baseline stage wait distributions."""
     rows: list[dict] = []
 
     for stage in STAGE_ORDER:
@@ -270,8 +260,8 @@ def summarise_real_wait_distributions(real_stage_waits: pd.DataFrame) -> pd.Data
 
     return pd.DataFrame(rows)
 
+#Return compact validation statistics for one stage or full pathway.
 def summarise_stage_validation(sim_series: pd.Series, real_series: pd.Series) -> dict:
-    """Return compact validation statistics for one stage or full pathway."""
     sim = sim_series.dropna().astype(float)
     real = real_series.dropna().astype(float)
 
@@ -290,6 +280,7 @@ def summarise_stage_validation(sim_series: pd.Series, real_series: pd.Series) ->
         "ks_pvalue": ks_p,
     }
 
+#Create one multi-panel ECDF figure for stage waits plus total pathway time.
 def plot_combined_stage_ecdfs(
     sim_stage_waits: pd.DataFrame,
     real_stage_waits: pd.DataFrame,
@@ -297,7 +288,6 @@ def plot_combined_stage_ecdfs(
     real_pathway: pd.DataFrame,
     out_path: Path,
 ) -> None:
-    """Create one multi-panel ECDF figure for stage waits plus total pathway time."""
 
     plot_items = []
 
@@ -385,12 +375,10 @@ def plot_combined_stage_ecdfs(
     plt.close()
     
 def main() -> None:
-    # ------------------------------------------------------------------
-    # 1. Run baseline simulation
-    # ------------------------------------------------------------------
+    # Run baseline simulation
     results = build_baseline_results()
 
-# Pool patient-level outputs across all seeds
+# Pool outputs across all seeds
     sim_stage_waits = pd.concat(
         [
             extract_stage_waits(result, f"ALL_BASELINE_seed_{i}")
@@ -407,9 +395,9 @@ def main() -> None:
         ignore_index=True,
     )
 
-    # ------------------------------------------------------------------
-    # 2. Load real baseline pathway data
-    # ------------------------------------------------------------------
+
+    # Load real baseline pathway data
+
     build_real_pathway_csvs(
         pre_ref_file=str(DATA_DIR / "pre_ref_to_mri.csv"),
         pre_outpat_file=str(DATA_DIR / "pre_treatmdt_to_outpat.csv"),
@@ -427,9 +415,9 @@ def main() -> None:
     real_stage_waits = load_real_stage_waits(DATA_DIR).copy()
     real_stage_waits = real_stage_waits[real_stage_waits["scenario"] == "pre"].copy()
 
-        # ------------------------------------------------------------------
-    # 2b. Real baseline descriptive wait distribution summary
-    # ------------------------------------------------------------------
+
+    # Real baseline descriptive wait distribution summary
+
     real_wait_distribution_summary = summarise_real_wait_distributions(real_stage_waits)
 
     real_wait_distribution_summary.to_csv(
@@ -464,10 +452,9 @@ def main() -> None:
         .to_string(index=False)
     )
 
-    # ------------------------------------------------------------------
-    # 3. Combined stage-level ECDF figure + compact summary table
-    #    Including total pathway time
-    # ------------------------------------------------------------------
+
+    # Combined stage-level ECDF figure + compact summary table, Including total pathway time
+
     stage_rows: list[dict] = []
 
     for stage in STAGE_ORDER:

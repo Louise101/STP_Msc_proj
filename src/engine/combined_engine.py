@@ -32,8 +32,8 @@ from engine.stage_logic import (
 )
 
 
-"""configuration for the combined pathway engine.
-    """
+#configuration for the combined pathway engine.
+
 @dataclass
 class CombinedEngineConfig:
     start_date: date
@@ -57,7 +57,7 @@ class CombinedEngineConfig:
     scenario_name: str | None = None
 
 
-"""Create a new patient at pathway referral."""
+#Create a new patient at pathway referral
 def create_new_combined_patient(patient_id: int, current_date: date) -> PatientState:
     patient = PatientState(
         patient_id=patient_id,
@@ -69,7 +69,7 @@ def create_new_combined_patient(patient_id: int, current_date: date) -> PatientS
     return patient
 
 
-"""Assign a patient to BASELINE or PROSTAD"""
+#Assign a patient to BASELINE or PROSTAD
 def sample_patient_pathway(patient: PatientState, base_seed: int, p_prostad: float) -> str:
     rng = make_patient_rng(base_seed, patient.patient_id, "route_pathway")
     u = rng.random()
@@ -77,7 +77,7 @@ def sample_patient_pathway(patient: PatientState, base_seed: int, p_prostad: flo
     return "PROSTAD" if u < p_prostad else "BASELINE"
 
 
-"""assign the rule set for the patient."""
+#assign the rule set for the patient
 def get_patient_stage_rules(patient: PatientState, cfg: CombinedEngineConfig):
     if patient.pathway_type == "PROSTAD":
         return (
@@ -93,25 +93,8 @@ def get_patient_stage_rules(patient: PatientState, cfg: CombinedEngineConfig):
     )
 
 
-#def enter_stage_for_patient(patient: PatientState, stage_name: str, ctx: StageContext, cfg: CombinedEngineConfig) -> None:
- #   wait_time_mode, stage_timing_policy, fixed_wait_days = get_patient_stage_rules(patient, cfg)
 
-    # old_wait_time_mode = ctx.wait_time_mode
-    # old_stage_timing_policy = ctx.stage_timing_policy
-    # old_fixed_wait_days = ctx.fixed_wait_days_by_stage
-
-    # ctx.wait_time_mode = wait_time_mode
-    # ctx.stage_timing_policy = stage_timing_policy
-    # ctx.fixed_wait_days_by_stage = fixed_wait_days
-
-    # try:
-    #     enter_wait_stage(patient, stage_name, ctx)
-    # finally:
-    #     ctx.wait_time_mode = old_wait_time_mode
-    #     ctx.stage_timing_policy = old_stage_timing_policy
-    #     ctx.fixed_wait_days_by_stage = old_fixed_wait_days
-
-"""Route a patient into the chosen stage using their pathway-specific rules."""
+#Route a patient into the chosen stage using their pathway-specific rules
 def enter_stage_for_patient(patient: PatientState, stage_name: str, ctx: StageContext, cfg: CombinedEngineConfig) -> None:
     wait_mode_map, timing_policy_map, fixed_wait_map = get_patient_stage_rules(patient, cfg)
     mode = wait_mode_map.get(stage_name, WAIT_MODE_MC)
@@ -168,7 +151,7 @@ def enter_stage_for_patient(patient: PatientState, stage_name: str, ctx: StageCo
 
 
 
-"""Complete one stage and route the patient onward."""
+#Complete one stage and route the patient onward
 def complete_wait_stage_combined(
     patient: PatientState,
     stage_name: str,
@@ -239,7 +222,7 @@ def complete_wait_stage_combined(
     raise ValueError(f"Unknown stage_name '{stage_name}'")
 
 
-"""Release all MC waits due today"""
+#Release all MC waits due today
 def process_all_mc_due_today_until_stable_combined(
     current_date: date,
     ctx: StageContext,
@@ -280,7 +263,7 @@ def process_all_mc_due_today_until_stable_combined(
 
     return total_released
 
-"""Process one DES resource and route any started patients onward."""
+#Process one DES resource and route any started patients onward
 def process_des_resource_for_day_combined(
     resource_name: str,
     current_date: date,
@@ -319,7 +302,7 @@ def process_des_resource_for_day_combined(
 
 
 
-"""Run the combined engine for one full simulation"""
+#Run the combined engine for one full simulation
 def run_day_loop_combined_engine(
     cfg: CombinedEngineConfig,
     *,
@@ -344,9 +327,6 @@ def run_day_loop_combined_engine(
     }
     biopsy_resource = QueueResource("BIOPSY", biopsy_capacity)
 
-    #pending_mc = initialize_pending_mc()
-   # pending_des_arrivals = initialize_pending_des_arrivals()
-   # stage_activity = initialize_stage_activity()
 
     ctx = StageContext(
         rng=rng,
@@ -419,7 +399,6 @@ def run_day_loop_combined_engine(
             completed_patients,
         )
 
-        # Important: MC completions may have created new DES arrivals for today
         release_due_des_arrivals_for_day(current_date, ctx)
 
         process_des_resource_for_day_combined(

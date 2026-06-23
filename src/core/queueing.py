@@ -7,9 +7,9 @@ from typing import Any, Deque, Dict, Iterable, List
 
 
 
-""" queue wrapper used by DES resources.
-    referral_date =  queue entry date for that specific resource,
-    """
+#queue wrapper used by DES resources.
+    #referral_date =  queue entry date for that specific resource,
+
 @dataclass
 class QueuePatient:
     patient_id: int
@@ -17,25 +17,18 @@ class QueuePatient:
     payload: Dict[str, Any] = field(default_factory=dict)
 
 
-"""patient started by a DES resource on a specific day."""
+#patient started by a DES resource on a specific day
 @dataclass
 class QueueServiceEvent:
     patient: QueuePatient
     wait_days: int
     start_date: date
 
-#define MC mode queue
-#@dataclass
-#class DelayQueueItem:
-#    patient: Any
- #   entry_date: date
-#    ready_date: date
-#    sampled_wait: int
- #   stage_name: str
 
 
-"""Simple FIFO queue with weekday-specific capacity.
-    """
+
+#FIFO queue with weekday-specific capacity
+
 @dataclass
 class QueueResource:
     name: str
@@ -46,31 +39,29 @@ class QueueResource:
     daily_queue_len: Dict[date, int] = field(default_factory=dict)
     daily_waits: Dict[date, List[int]] = field(default_factory=dict)
 
-    """Add one patient to the back of the FIFO queue."""
+    #Add one patient to the back of the FIFO queue
     def add_patient(self, patient: QueuePatient) -> None:
         self.queue.append(patient)
 
-    """Add multiple patients to the back of the FIFO queue."""
+    #Add multiple patients to the back of the FIFO queue
     def add_patients(self, patients: Iterable[QueuePatient]) -> None:
         self.queue.extend(patients)
 
-    """Return current queue length."""
+    #Return current queue length
     def queue_length(self) -> int:
         return len(self.queue)
 
     
-    """
-        Return available capacity for a given day.
-            Monday=0, Tuesday=1, ..., Sunday=6
-        """
+    #Return available capacity for a given day.
+            #Monday=0, Tuesday=1, ..., Sunday=6
+  
     def get_capacity_for_day(self, current_date: date) -> int:
         return int(self.capacity_by_weekday.get(current_date.weekday(), 0))
 
     
-    """
-        Process patients up to available capacity for the day.
-        Patients are served in FIFO order.
-        """
+
+        #Process patients up to available capacity for the day.
+
     def process_day(self, current_date: date) -> List[QueueServiceEvent]:
     
         capacity = self.get_capacity_for_day(current_date)

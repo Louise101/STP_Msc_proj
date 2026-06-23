@@ -7,21 +7,17 @@ from scipy.stats import norm
 
 Number = int | float
 
-#from verify_batch_against_data import  empirical_percentile
+#Return a supplied RNG or create a fresh one.
 
-
-
-"""Return a supplied RNG or create a fresh one.
-    """
 def get_rng(rng: Optional[np.random.Generator] = None) -> np.random.Generator:
     return rng if rng is not None else np.random.default_rng()
 
 
 
-"""
-    Sample an integer value from empirical samples using inverse transform sampling.
-    If u is provided, it must be in [0,1) and will be used instead of drawing a new uniform.
-    """
+
+    #Sample an integer value from empirical samples using inverse transform sampling.
+    #If u is provided, it must be in [0,1) and will be used instead of drawing a new uniform.
+
 def sample_empirical_ecdf(samples: pd.Series, rng: np.random.Generator, u: float | None = None) -> int:
 
     x = np.sort(samples.dropna().to_numpy())
@@ -42,8 +38,7 @@ def sample_empirical_ecdf(samples: pd.Series, rng: np.random.Generator, u: float
 
 
 
-
-"""Sample weekday referrals and force weekend referrals to zero."""
+#Sample weekday referrals and force weekend referrals to zero
 def sample_poisson_weekday_only(
     lam_per_workday: float,
     weekday: int,

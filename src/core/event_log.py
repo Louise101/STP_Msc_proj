@@ -15,7 +15,7 @@ EVENT_LOG_COLUMNS = [
 ]
 
 EVENT_TO_STAGE = {
-    "referral_recieved": "ref_to_mri",   # legacy misspelling retained for compatibility
+    "referral_recieved": "ref_to_mri",   
     "referral_received": "ref_to_mri",   
 
     "mri_performed": "ref_to_mri",
@@ -31,7 +31,7 @@ EVENT_TO_STAGE = {
 
 
 
-"""Convert many date-like inputs to a normalized pandas Timestamp."""
+#Convert many date-like inputs to a normalized pandas Timestamp
 def to_timestamp(value: object) -> pd.Timestamp:
     if pd.isna(value):
         return pd.NaT
@@ -45,7 +45,7 @@ def to_timestamp(value: object) -> pd.Timestamp:
 
 
 
-"""Convert a flat list of event dictionaries into a standard event log."""
+#Convert a flat list of event dictionaries into a standard event log
 def event_records_to_dataframe(
     records: list[dict],
     source_engine: str | None = None,
@@ -83,7 +83,7 @@ def event_records_to_dataframe(
 
 
 
-"""Convert engine patient results to the standard long-format event log."""
+#Convert engine patient results to the standard long-format event log
 def patient_results_to_event_log(
     patient_results: list,
     source_engine: str = "COMBINED_ENGINE",
@@ -124,7 +124,7 @@ def patient_results_to_event_log(
     return event_records_to_dataframe(records, source_engine=source_engine, start_date=start_date)
 
 
-"""Save event log to CSV, creating parent folders when needed."""
+#Save event log to CSV
 def save_event_log(df: pd.DataFrame, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path, index=False)

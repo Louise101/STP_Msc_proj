@@ -27,7 +27,7 @@ from engine.combined_engine import run_day_loop_combined_engine
 OUTPUT_DIR = Path(__file__).resolve().parents[2] / "outputs" / "refactored_runs"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-
+#Run one or more named scenarios from the central scenario registry.
 def run_named_scenarios(
     scenario_names: list[str],
     *,
@@ -36,11 +36,8 @@ def run_named_scenarios(
     lam_per_workday=DEFAULT_LAM_PER_WORKDAY,
     seeds: list[int] | None = None,
 ) -> dict[str, pd.DataFrame]:
-    """Run one or more named scenarios from the central scenario registry.
+    
 
-    This is now the main entry point for experiments. To add a new scenario,
-    update ``config/scenarios.py`` and call it here by name.
-    """
     if seeds is None:
         seeds = [1234]
 

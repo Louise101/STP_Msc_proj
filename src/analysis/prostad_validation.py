@@ -13,7 +13,6 @@ from engine.combined_engine import run_day_loop_combined_engine
 from engine.scenarios import build_combined_config, generate_daily_referrals
 from analysis.validation import build_real_pathway_csvs, load_real_pathway_data
 
-
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 
@@ -23,13 +22,16 @@ SCENARIO_NAME = f"OBS_MIX_MRI{MRI_SLOTS_PER_WEEK}"
 OUTPUT_DIR = BASE_DIR / "outputs" / f"prostad_validation_mri{MRI_SLOTS_PER_WEEK}"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+
 START_DATE = date(2026, 1, 5)
 N_DAYS = 365
 LAM_PER_WORKDAY = 1.1010830324909748
 
 SEEDS = range(1000, 1030)
 
+
 FULL_PATHWAY_EVENT = "Outpatient_appointment_occured"
+
 
 STAGE_ORDER = [
     "ref_to_mri",
@@ -61,6 +63,7 @@ STAGE_ENDPOINT_EVENTS = {
     "treatmdt_to_outpat": "Outpatient_appointment_occured",
 }
 
+
 PROSTAD_REPORT_MEANS = {
     "ref_to_mri": 13.0,
     "mri_to_report": 14.0,
@@ -70,7 +73,7 @@ PROSTAD_REPORT_MEANS = {
     "treatmdt_to_outpat": 70.0,
 }
 
-
+#Parse date columns from the pathway CSV files.
 def parse_date_series(series: pd.Series, style: str = "generic") -> pd.Series:
     s = series.astype(str).str.strip()
 
@@ -90,6 +93,7 @@ def parse_date_series(series: pd.Series, style: str = "generic") -> pd.Series:
 
     return pd.to_datetime(s, errors="coerce")
 
+#Run one mixed standard/PROSTAD simulation for a single RNG seed.
 def build_obs_mix_result(seed: int) -> dict:
     referral_schedule = generate_daily_referrals(
         start_date=START_DATE,
@@ -115,6 +119,7 @@ def build_obs_mix_result(seed: int) -> dict:
         daily_referrals_override=referral_schedule,
     )
 
+#Extract inter-stage waiting times from simulated patient event logs
 def extract_stage_waits_from_sim(result: dict, seed: int) -> pd.DataFrame:
     rows: list[dict] = []
 
@@ -148,7 +153,7 @@ def extract_stage_waits_from_sim(result: dict, seed: int) -> pd.DataFrame:
 
     return pd.DataFrame(rows)
 
-
+#Extract total pathway duration for simulated patients reaching outpatient appointment
 def extract_full_pathway_from_sim(result: dict, seed: int) -> pd.DataFrame:
     rows: list[dict] = []
 
@@ -170,7 +175,7 @@ def extract_full_pathway_from_sim(result: dict, seed: int) -> pd.DataFrame:
 
     return pd.DataFrame(rows)
 
-
+#Return the first date on which a named event occurred for a simulated patient
 def get_first_event_date(patient, event_name: str):
     dates = [
         event.get("date")
@@ -179,7 +184,7 @@ def get_first_event_date(patient, event_name: str):
     ]
     return min(dates) if dates else None
 
-
+#Calculate time from referral to each key pathway stage for simulated patients.
 def extract_time_to_stage_from_sim(result: dict, seed: int) -> pd.DataFrame:
     rows: list[dict] = []
 
@@ -211,7 +216,7 @@ def extract_time_to_stage_from_sim(result: dict, seed: int) -> pd.DataFrame:
 
     return pd.DataFrame(rows)
 
-
+#Load observed PROSTAD inter-stage waits from the source CSV files.
 def load_real_prostad_stage_waits(data_dir: Path) -> pd.DataFrame:
     rows: list[dict] = []
 
@@ -239,7 +244,7 @@ def load_real_prostad_stage_waits(data_dir: Path) -> pd.DataFrame:
 
     return pd.DataFrame(rows)
 
-
+#Load observed standard-pathway inter-stage waits from the source CSV files
 def load_real_baseline_stage_waits(data_dir: Path) -> pd.DataFrame:
     rows: list[dict] = []
 
@@ -266,7 +271,7 @@ def load_real_baseline_stage_waits(data_dir: Path) -> pd.DataFrame:
 
     return pd.DataFrame(rows)
 
-
+#Load observed PROSTAD total pathway times from referral to outpatient appointment.
 def load_real_prostad_full_pathway(data_dir: Path) -> pd.DataFrame:
     _, real_pros_path = load_real_pathway_data(
         str(data_dir / "pre_pathway.csv"),
@@ -280,7 +285,7 @@ def load_real_prostad_full_pathway(data_dir: Path) -> pd.DataFrame:
 
     return real_pros_path[["total_days"]]
 
-
+#Load observed standard-pathway total pathway times from referral to outpatient appointment
 def load_real_baseline_full_pathway(data_dir: Path) -> pd.DataFrame:
     real_pre_path, _ = load_real_pathway_data(
         str(data_dir / "pre_pathway.csv"),
@@ -294,7 +299,7 @@ def load_real_baseline_full_pathway(data_dir: Path) -> pd.DataFrame:
 
     return real_pre_path[["total_days"]]
 
-
+#Load observed PROSTAD cumulative times from referral to each pathway stage.
 def load_real_prostad_time_to_stage(data_dir: Path) -> pd.DataFrame:
     rows: list[dict] = []
 
@@ -346,7 +351,7 @@ def load_real_prostad_time_to_stage(data_dir: Path) -> pd.DataFrame:
 
     return pd.DataFrame(rows)
 
-
+#Load observed standard-pathway cumulative times from referral to each pathway stage.
 def load_real_baseline_time_to_stage(data_dir: Path) -> pd.DataFrame:
     rows: list[dict] = []
 
@@ -404,7 +409,7 @@ def load_real_baseline_time_to_stage(data_dir: Path) -> pd.DataFrame:
 
     return pd.DataFrame(rows)
 
-
+#Return x and y values for an empirical cumulative distribution function.
 def ecdf(values: Iterable[float]) -> tuple[np.ndarray, np.ndarray]:
     x = np.asarray(list(values), dtype=float)
     x = x[~np.isnan(x)]
@@ -412,7 +417,7 @@ def ecdf(values: Iterable[float]) -> tuple[np.ndarray, np.ndarray]:
     y = np.arange(1, len(x) + 1) / len(x) if len(x) else np.array([])
     return x, y
 
-
+#Compare simulated and observed distributions using summary statistics and a KS test.
 def compare_distributions(sim_series: pd.Series, real_series: pd.Series) -> dict:
     sim_series = pd.to_numeric(sim_series, errors="coerce").dropna()
     real_series = pd.to_numeric(real_series, errors="coerce").dropna()
@@ -450,7 +455,7 @@ def compare_distributions(sim_series: pd.Series, real_series: pd.Series) -> dict
         "ks_pvalue": float(ks_p),
     }
 
-
+#Compare group means using Welch's t-test and a 95% confidence interval.
 def compare_mean_difference(group_a: pd.Series, group_b: pd.Series) -> dict:
     a = pd.to_numeric(group_a, errors="coerce").dropna().to_numpy()
     b = pd.to_numeric(group_b, errors="coerce").dropna().to_numpy()
@@ -485,8 +490,9 @@ def compare_mean_difference(group_a: pd.Series, group_b: pd.Series) -> dict:
         "p_value": float(test.pvalue),
     }
 
-
+    # Builds a PROSTAD report-style comparison table for each seed.
 def build_table8_mixed_sim_comparison(
+
     sim_time_to_stage: pd.DataFrame,
     real_pros_time_to_stage: pd.DataFrame,
     real_standard_time_to_stage: pd.DataFrame,
@@ -566,7 +572,7 @@ def build_table8_mixed_sim_comparison(
 
     return pd.DataFrame(rows)
 
-
+#Summarise validation statistics across all RNG seeds.
 def summarise_seed_level_results(seed_summary_df: pd.DataFrame) -> pd.DataFrame:
     return (
         seed_summary_df
@@ -593,8 +599,8 @@ def summarise_seed_level_results(seed_summary_df: pd.DataFrame) -> pd.DataFrame:
         )
     )
 
-
-def add_seed_validation_rows(
+# Create validation summary rows for one seed and one pathway group.
+def add_seed_validation_rows( 
     seed: int,
     pathway_label: str,
     sim_stage_waits: pd.DataFrame,
@@ -647,8 +653,9 @@ def add_seed_validation_rows(
 
     return pd.DataFrame(rows)
 
-
+# Plot a single observed-vs-simulated ECDF comparison.
 def plot_ecdf(
+    
     sim_series: pd.Series,
     real_series: pd.Series,
     title: str,
@@ -703,8 +710,9 @@ def plot_ecdf(
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close()
 
-
+# Plot a single observed-vs-simulated boxplot comparison.
 def plot_boxplot(
+    
     sim_series: pd.Series,
     real_series: pd.Series,
     title: str,
@@ -741,8 +749,9 @@ def plot_boxplot(
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close()
 
-
+# Generate individual ECDF and boxplot validation figures from pooled multi-seed outputs.
 def make_pooled_validation_plots(
+    
     pooled_stage: pd.DataFrame,
     pooled_pathway: pd.DataFrame,
     real_stage_waits: pd.DataFrame,
@@ -828,7 +837,9 @@ def make_pooled_validation_plots(
         real_label=real_label,
     )
 
+# Plot a simplified full-pathway ECDF figure for poster/presentation use.
 def plot_poster_mixed_ecdf(
+    
     real_prostad: pd.Series,
     sim_prostad: pd.Series,
     real_standard: pd.Series,
@@ -847,11 +858,6 @@ def plot_poster_mixed_ecdf(
         (real_standard, "Standard observed", "dashed",  "#5FB3B3",),
         (sim_standard, "Standard simulated", "-", "#5FB3B3",),
 
-        # "#E6F4F3",  # very light teal (background match)
-       # "#A8D5D2",  # light teal
-       # "#5FB3B3",  # mid teal
-       # "#2F7F8F",  # teal-blue
-       # "#1F4E79",  # dark blue
     ]
 
     plt.figure(figsize=(9, 6))
@@ -868,8 +874,7 @@ def plot_poster_mixed_ecdf(
             color=color,
         )
 
-   # plt.xlabel(x_label, fontsize=18, labelpad=10)
-    #plt.ylabel("Cumulative proportion of patients", fontsize=18, labelpad=10)
+   
     plt.xticks(fontsize=24)
     plt.yticks(fontsize=24)
 
@@ -880,7 +885,9 @@ def plot_poster_mixed_ecdf(
     plt.savefig(out_path, format="svg", bbox_inches="tight")
     plt.close()
 
+# Create the combined 3x2 ECDF figure used for PROSTAD validation.
 def plot_combined_prostad_ecdfs(
+    
     pooled_stage: pd.DataFrame,
     pooled_pathway: pd.DataFrame,
     real_stage_waits: pd.DataFrame,
@@ -948,18 +955,15 @@ def plot_combined_prostad_ecdfs(
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False, fontsize=18)
 
-    #fig.suptitle(
-     #   f"PROSTAD validation: observed vs simulated, MRI slots/week = {MRI_SLOTS_PER_WEEK}",
-      #  y=0.995,
-       # fontsize=16,
-    #)
 
 
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     plt.savefig(out_path, dpi=300, bbox_inches="tight", pad_inches=0.1)
     plt.close()
 
+# Build a compact table matching the PROSTAD evaluation report structure.
 def build_prostad_evaluation_style_table(
+    
     real_standard_time_to_stage: pd.DataFrame,
     real_prostad_time_to_stage: pd.DataFrame,
     sim_time_to_stage: pd.DataFrame,
@@ -1026,7 +1030,9 @@ def build_prostad_evaluation_style_table(
 
     return pd.DataFrame(rows)
 
+# Build total-pathway CSVs from referral and outpatient files before validation.
 def main() -> None:
+    
     build_real_pathway_csvs(
         pre_ref_file=str(DATA_DIR / "pre_ref_to_mri.csv"),
         pre_outpat_file=str(DATA_DIR / "pre_treatmdt_to_outpat.csv"),
@@ -1036,6 +1042,7 @@ def main() -> None:
         out_pros_file=str(DATA_DIR / "pros_pathway.csv"),
     )
 
+    # Load observed PROSTAD and standard pathway data for stage-level and total-pathway validation.
     real_prostad_stage_waits = load_real_prostad_stage_waits(DATA_DIR)
     real_prostad_pathway = load_real_prostad_full_pathway(DATA_DIR)
 
@@ -1045,6 +1052,7 @@ def main() -> None:
     real_prostad_time_to_stage = load_real_prostad_time_to_stage(DATA_DIR)
     real_standard_time_to_stage = load_real_baseline_time_to_stage(DATA_DIR)
 
+    # Containers used to store outputs from each seed before pooling across runs.
     all_stage_waits: list[pd.DataFrame] = []
     all_pathways: list[pd.DataFrame] = []
     all_time_to_stage: list[pd.DataFrame] = []
@@ -1053,6 +1061,7 @@ def main() -> None:
     all_standard_seed_summaries: list[pd.DataFrame] = []
     all_table8_rows: list[pd.DataFrame] = []
 
+    # Run the simulation once for each RNG seed and collect validation outputs.
     for seed in SEEDS:
         print(f"\nRunning seed {seed}...")
 
@@ -1066,6 +1075,7 @@ def main() -> None:
         all_pathways.append(sim_pathway_all)
         all_time_to_stage.append(sim_time_to_stage)
 
+        # Split simulated outputs by pathway type for separate validation.
         sim_prostad_stage_waits = sim_stage_waits_all[
             sim_stage_waits_all["pathway_type"] == "PROSTAD"
         ].copy()
@@ -1082,6 +1092,7 @@ def main() -> None:
             sim_pathway_all["pathway_type"] == "BASELINE"
         ].copy()
 
+        # Generate validation summaries for PROSTAD and standard pathway patients.
         prostad_seed_df = add_seed_validation_rows(
             seed=seed,
             pathway_label="PROSTAD",
@@ -1102,6 +1113,7 @@ def main() -> None:
         )
         all_standard_seed_summaries.append(standard_seed_df)
 
+        # Generate one PROSTAD report-style comparison table for this seed.
         table8_df = build_table8_mixed_sim_comparison(
             sim_time_to_stage=sim_time_to_stage,
             real_pros_time_to_stage=real_prostad_time_to_stage,
@@ -1110,6 +1122,7 @@ def main() -> None:
         table8_df["seed"] = seed
         all_table8_rows.append(table8_df)
 
+    # Pool simulation outputs across all seeds.
     all_stage_waits_df = pd.concat(all_stage_waits, ignore_index=True)
     all_pathway_df = pd.concat(all_pathways, ignore_index=True)
     all_time_to_stage_df = pd.concat(all_time_to_stage, ignore_index=True)
@@ -1118,6 +1131,7 @@ def main() -> None:
     all_pathway_df.to_csv(OUTPUT_DIR / "all_seed_full_pathways.csv", index=False)
     all_time_to_stage_df.to_csv(OUTPUT_DIR / "all_seed_time_to_stage.csv", index=False)
 
+    # Save and across-seed PROSTAD validation summaries.
     prostad_seed_summary_df = pd.concat(all_prostad_seed_summaries, ignore_index=True)
     prostad_seed_summary_df.to_csv(
         OUTPUT_DIR / "prostad_validation_seed_level_summary.csv",
@@ -1130,6 +1144,7 @@ def main() -> None:
         index=False,
     )
 
+    # Save and across-seed standard-pathway validation summaries.
     standard_seed_summary_df = pd.concat(all_standard_seed_summaries, ignore_index=True)
     standard_seed_summary_df.to_csv(
         OUTPUT_DIR / "standard_validation_seed_level_summary.csv",
@@ -1190,6 +1205,7 @@ def main() -> None:
         ].round(3).to_string(index=False)
     )
 
+    # Summarise PROSTAD report-style comparison outputs across all seeds.
     table8_seed_df = pd.concat(all_table8_rows, ignore_index=True)
     table8_seed_df.to_csv(
         OUTPUT_DIR / "table8_mixed_sim_comparison_seed_level.csv",
@@ -1258,6 +1274,7 @@ def main() -> None:
         ].round(3).to_string(index=False)
     )
 
+    # Create pooled datasets for plotting observed vs simulated validation figures.
     pooled_prostad_stage = all_stage_waits_df[
         all_stage_waits_df["pathway_type"] == "PROSTAD"
     ].copy()
@@ -1274,6 +1291,7 @@ def main() -> None:
         all_pathway_df["pathway_type"] == "BASELINE"
     ].copy()
 
+    # Main combined ECDF figure used in the dissertation results section.
     plot_combined_prostad_ecdfs(
         pooled_stage=pooled_prostad_stage,
         pooled_pathway=pooled_prostad_pathway,
@@ -1282,6 +1300,7 @@ def main() -> None:
         out_path=OUTPUT_DIR / f"combined_prostad_ecdfs_mri{MRI_SLOTS_PER_WEEK}.png",
     )
 
+    # Compact PROSTAD evaluation style median table for MRI capacity comparison.
     prostad_eval_table = build_prostad_evaluation_style_table(
         real_standard_time_to_stage=real_standard_time_to_stage,
         real_prostad_time_to_stage=real_prostad_time_to_stage,
@@ -1296,6 +1315,7 @@ def main() -> None:
     print(f"\n=== PROSTAD EVALUATION STYLE TABLE: MRI {MRI_SLOTS_PER_WEEK} slots/week ===")
     print(prostad_eval_table.round(2).to_string(index=False))
 
+    # Additional single-stage ECDF and boxplot outputs for detailed validation checks.
     make_pooled_validation_plots(
         pooled_stage=pooled_prostad_stage,
         pooled_pathway=pooled_prostad_pathway,
@@ -1320,6 +1340,7 @@ def main() -> None:
 
     print(f"\nSaved outputs to: {OUTPUT_DIR}")
 
+    # Presentation/poster full-pathway ECDF comparing observed and simulated pathways.
     plot_poster_mixed_ecdf(
         real_prostad=real_prostad_pathway["total_days"],
         sim_prostad=pooled_prostad_pathway["total_days"],
@@ -1329,5 +1350,6 @@ def main() -> None:
     )
 
 
+# Standard Python entry point.
 if __name__ == "__main__":
     main()

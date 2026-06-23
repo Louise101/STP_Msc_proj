@@ -25,20 +25,13 @@ DEFAULT_BIOPSY_CAPACITY = {
     6: 0,
 }
 
-
+#Return the ordered stage names from the pathway definition.
 def all_stages() -> list[str]:
-    """Return the ordered stage names from the pathway definition."""
     return list(STAGE_CONFIG.keys())
 
 
 @dataclass
 class ScenarioTemplate:
-    """High-level template describing how to build a named scenario.
-
-    This is the single place to define and extend scenarios. To create a new
-    experiment, add one new entry to ``SCENARIO_LIBRARY`` instead of writing a
-    new runner script.
-    """
 
     name: str
     p_prostad: float
@@ -126,12 +119,11 @@ SCENARIO_LIBRARY: dict[str, ScenarioTemplate] = {
     ),
 }
 
-
+#Add or replace a scenario template in the central scenario library.
 def register_scenario(template: ScenarioTemplate) -> None:
-    """Add or replace a scenario template in the central scenario library."""
     SCENARIO_LIBRARY[template.name] = template
 
-
+#Build a concrete engine config from a named scenario template.
 def build_combined_config(
     scenario_name: str,
     *,
@@ -141,7 +133,6 @@ def build_combined_config(
     seed: int = 1234,
     overrides: dict[str, Any] | None = None,
 ) -> CombinedEngineConfig:
-    """Build a concrete engine config from a named scenario template."""
     if scenario_name not in SCENARIO_LIBRARY:
         valid = ", ".join(sorted(SCENARIO_LIBRARY))
         raise ValueError(f"Unknown scenario '{scenario_name}'. Valid options: {valid}")
@@ -169,14 +160,13 @@ def build_combined_config(
             setattr(config, key, value)
     return config
 
-
+#Generate one reproducible referral stream to share across scenarios.
 def generate_daily_referrals(
     start_date: date,
     n_days: int,
     lam_per_workday: float,
     seed: int,
 ) -> dict[date, int]:
-    """Generate one reproducible referral stream to share across scenarios."""
     rng = np.random.default_rng(seed)
     referrals: dict[date, int] = {}
     current_date = start_date
